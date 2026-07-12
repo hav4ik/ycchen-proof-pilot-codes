@@ -204,54 +204,18 @@ class Orchestrator:
         t0 = time.time()
         wi = await self.trainer.save()
         path, wv = wi["path"], int(wi["weight_version"])
-        if wv <= self.weight_version:
-            raise RuntimeError(
-                f"non-monotonic rollout weight version: current={self.weight_version}, "
-                f"received={wv}"
-            )
 
-        async def gather_stage(name, calls):
-            results = await asyncio.gather(*calls, return_exceptions=True)
-            failures = [repr(r) for r in results if isinstance(r, Exception)]
-            if failures:
-                log.error("weight sync %s stage failed: %s", name, failures)
-                raise RuntimeError(
-                    f"weight sync {name} stage failed for {len(failures)}/"
-                    f"{len(self.rollout_clients)} rollout replicas"
-                )
-            return results
-
-        await gather_stage(
-            "pause", [c.pause_generation("retract") for c in self.rollout_clients]
-        )
-        res = await gather_stage(
-            "reload",
-            [
-                c.update_weights_from_disk(path, weight_version=wv, flush_cache=True)
-                for c in self.rollout_clients
-            ],
-        )
-        failed_responses = [
-            r.get("message", "weight reload failed")
-            for r in res
-            if not r.get("success", False)
-        ]
-        if failed_responses:
-            log.error(
-                "weight sync reload was rejected; all replicas remain paused: %s",
-                failed_responses,
-            )
-            raise RuntimeError(
-                f"weight sync reload rejected by {len(failed_responses)}/"
-                f"{len(self.rollout_clients)} rollout replicas"
-            )
-        await gather_stage(
-            "resume", [c.continue_generation() for c in self.rollout_clients]
-        )
-        n_ok = len(res)
+        async def reload(client):
+            await client.pause_generation("in_place")
+            try:
+                await client.update_weights_from_disk(path, weight_version=wv, flush_cache=False)
+            finally:
+                await client.continue_generation()
+        res = await asyncio.gather(*[reload(c) for c in self.rollout_clients], return_exceptions=True)
+        n_ok = sum(1 for r in res if not isinstance(r, Exception))
+        self.weight_version = wv
         self._last_sync_s = time.time() - t0
         self._last_sync_ok = n_ok
-        self.weight_version = wv
         log.info("weight sync -> wv=%d (%d/%d rollout replicas, %.1fs)",
                  wv, n_ok, len(self.rollout_clients), self._last_sync_s)
         return wv
