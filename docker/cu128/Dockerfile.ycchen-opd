@@ -157,6 +157,12 @@ RUN set -eux; \
     "${SERVE_VENV}/bin/python" -c "import sglang.srt.models.deepseek_v4, sglang.srt.entrypoints.http_server, sglang.srt.managers.scheduler_components.batch_result_processor, sglang.srt.managers.scheduler_components.output_streamer; print('teacher hidden-extract patches applied + import OK')"; \
     rm -rf /tmp/tsrc /tmp/tout
 
+# OPD launchers (faithful ports of run_mn.sh) + env presets -> /opt/opd/launch
+#   multi-node:   source /opt/opd/launch/env_v33_b200.sh   && bash /opt/opd/launch/run_mn_cu128.sh
+#   single-node:  source /opt/opd/launch/env_1node_smoke.sh && bash /opt/opd/launch/run_1node.sh
+COPY docker/cu128/launch /opt/opd/launch
+RUN chmod +x /opt/opd/launch/*.sh
+
 WORKDIR /opt/opd/repo/training/opd_v2
 # No ENTRYPOINT — launched per-role on a single node (one GPU each). Serve scripts baked at /opt/opd/opd_serve:
 #   teacher:      CUDA_VISIBLE_DEVICES=3 /opt/opd/opd_serve/run_teacher.sh --tp 1 --port 8100

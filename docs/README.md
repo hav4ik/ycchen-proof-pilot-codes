@@ -16,6 +16,12 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 
 ## Change log (newest first)
 
+### Container launchers (faithful ports of run_mn.sh)
+Added `docker/cu128/launch/`: `run_mn_cu128.sh` (multi-node, her V33 topology) + `env_v33_b200.sh`,
+and `run_1node.sh` (single-node 8-GPU, 4:2:2 teacher:rollout:trainer) + `env_1node_smoke.sh`. Only the
+cu128 substitutions differ from her run_mn.sh (our baked role scripts, image train python,
+`ATTN_IMPL=olmo3_sink_fa2`). Baked into the image at `/opt/opd/launch/`.
+
 ### Documented her algorithm + config
 Added [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) (environment + rollout + training loop, read from her
 code) and [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md) (all knobs + her best OPD-32B V33
