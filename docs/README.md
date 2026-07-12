@@ -14,6 +14,18 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 
 ## Change log (newest first)
 
+### Faithfulness guard — restored her weight-sync behavior
+The working tree carried local edits to `orchestrator.py` / `data_plane/clients.py` /
+`trainer/core.py` that **changed** her design (abort-pause + `flush_cache=True` +
+fail-closed all-or-nothing barrier + a producer-side sink-checkpoint validator) rather than
+only fixing bugs — her code deliberately uses `in_place` + `flush_cache=False` ("under
+in_place a failed flush asserts and kills the scheduler") and tolerates partial replica
+reloads (semi-on-policy). These were **reverted to her exact `74faacb` code** to stay
+faithful; the departed work + its two tests are preserved on branch
+**`wip/weight-sync-barrier`** for later review as an explicit opt-in.
+(`build_l4.py` still carries one benign SFT data-prep bugfix — drop truncated docs missing
+EOS to avoid training non-termination — pending a keep/revert decision.)
+
 ### cu128/B200 port
 - **Container** `docker/cu128/Dockerfile.ycchen-opd` — full loop, two isolated venvs
   (base trainer/orchestrator; `/opt/venv/serve` rollout + teacher sglang 0.5.14). Builds
