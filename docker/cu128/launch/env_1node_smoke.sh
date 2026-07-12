@@ -1,14 +1,18 @@
-# OPD v2 — single-node 8-GPU (4:2:2) MINIMAL end-to-end shakeout. Source before run_1node.sh:
+# OPD v2 — single-node 8-GPU (4:2:2) end-to-end shakeout. Source before run_1node.sh:
 #   source /opt/opd/launch/env_1node_smoke.sh && bash /opt/opd/launch/run_1node.sh
 #
 # Purpose: prove the full loop works end-to-end (rollout -> teacher hidden-extract -> JSD -> FSDP2 step
-# -> weight sync -> checkpoint) on real hardware before the 64x B200 run. Deliberately small: 40k max
-# seq-len, small batch, ~20 steps. Every knob below is env-overridable (${VAR:-default}).
+# -> weight sync -> checkpoint) on real hardware before the 64x B200 run. Runs the SAME producer as
+# production: the AGENTIC self-play pool (prove/verify/refine/select) seeded from the dsflash dataset.
+# Scaled down: ~57k seq-len (the agentic min_gen_room floor), small batch, ~20 steps. Env-overridable.
 # REQUIRED cluster paths: STUDENT_PATH, DEEPSEEK_V4_FLASH, RUN_DIR (scratch/shared).
 
-# Core loop, no agentic pool (single_round has no min_gen_room floor -> smallest feasible context).
-# Prompts come from the in-repo distill_gen/problems/problems.parquet (self-contained; no HF token).
-export PRODUCER="${PRODUCER:-single_round}"
+# Producer = agentic (her production path). Problems + warm-start proofs come from the seed dataset
+# ycchen/dsflash-proof-distill-v2-test (public HF), built into the pool at runtime by opd_v2.agentic.seed
+# -> needs network on the node (or pre-seed once: python -m opd_v2.agentic.seed --run-dir $RUN_DIR).
+export PRODUCER="${PRODUCER:-agentic}"
+export SEED_SOURCE="${SEED_SOURCE:-ycchen/dsflash-proof-distill-v2-test}"   # the OPD prompt dataset
+export SEED_HF_CONFIG="${SEED_HF_CONFIG:-per_problem}"
 export ATTN_IMPL="${ATTN_IMPL:-olmo3_sink_fa2}"
 export STUDENT_PATH="${STUDENT_PATH:?set to the deploy-format student dir (e.g. chankhavu/yccchen-olmo3-deploy checkout)}"
 export STUDENT_DEPLOY_PATH="${STUDENT_DEPLOY_PATH:-$STUDENT_PATH}"   # same deploy dir works for weight-sync saves
@@ -21,14 +25,16 @@ export ROLLOUT_GPUS="${ROLLOUT_GPUS:-4,5}"     ROLLOUT_TP="${ROLLOUT_TP:-2}"
 export TRAINER_GPUS="${TRAINER_GPUS:-6,7}"     TRAINER_NPROC="${TRAINER_NPROC:-2}"
 export MOE_BACKEND="${MOE_BACKEND:-marlin}"    # Hopper/H200: marlin OK. B200: pick a Blackwell backend.
 
-# ---- minimal scale: 40k max seq-len, small batch (MICRO must be >= MAX_TRAJ_TOKENS: traj un-windowed) ----
-export CONTEXT_LEN="${CONTEXT_LEN:-40960}" MAX_TRAJ_TOKENS="${MAX_TRAJ_TOKENS:-40960}" MICRO="${MICRO:-40960}"
-export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-36864}"
+# ---- scale: ~57k seq-len = the agentic floor min_gen_room(48000)+max(bundle caps). MICRO >= MAX_TRAJ. ----
+# Reduced refine/select bundle caps (her prod 40k/50k) pull the floor down to ~56k so it fits 8 GPUs.
+export REFINE_BUNDLE_CAP="${REFINE_BUNDLE_CAP:-8000}" SELECT_BUNDLE_CAP="${SELECT_BUNDLE_CAP:-8000}"
+export CONTEXT_LEN="${CONTEXT_LEN:-57344}" MAX_TRAJ_TOKENS="${MAX_TRAJ_TOKENS:-57344}" MICRO="${MICRO:-57344}"
+export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-49152}"
 export KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8_e4m3}" SWA_RATIO="${SWA_RATIO:-0.2}" MEMFRAC="${MEMFRAC:-0.85}"
-export TEACHER_CONTEXT_LEN="${TEACHER_CONTEXT_LEN:-45056}" TEACHER_MEMFRAC="${TEACHER_MEMFRAC:-0.78}" TEACHER_MAXRUN="${TEACHER_MAXRUN:-8}"
-export ROLLOUT_N="${ROLLOUT_N:-2}"                 # samples per prompt (single_round fan-out)
+export TEACHER_CONTEXT_LEN="${TEACHER_CONTEXT_LEN:-61440}" TEACHER_MEMFRAC="${TEACHER_MEMFRAC:-0.78}" TEACHER_MAXRUN="${TEACHER_MAXRUN:-8}"
+export ROLLOUT_N="${ROLLOUT_N:-2}"                 # samples per produce_sample task
 export ROLLOUT_MAXRUN="${ROLLOUT_MAXRUN:-4}" TARGET_INFLIGHT="${TARGET_INFLIGHT:-8}"
-export ROLLOUT_GEN_TIMEOUT="${ROLLOUT_GEN_TIMEOUT:-1800}" STARVE_TIMEOUT="${STARVE_TIMEOUT:-3600}" DROP_FINISH_REASONS="${DROP_FINISH_REASONS-length}"
+export ROLLOUT_GEN_TIMEOUT="${ROLLOUT_GEN_TIMEOUT:-3000}" STARVE_TIMEOUT="${STARVE_TIMEOUT:-3600}" DROP_FINISH_REASONS="${DROP_FINISH_REASONS-length}"
 export CHUNK_SIZE="${CHUNK_SIZE:-2048}" CPU_OFFLOAD="${CPU_OFFLOAD:-1}" TRAIN_BATCH_TRAJS="${TRAIN_BATCH_TRAJS:-4}"
 export BETA="${BETA:-1.0}" LR="${LR:-1e-5}" WEIGHT_SYNC_EVERY="${WEIGHT_SYNC_EVERY:-4}" G4_EVERY="${G4_EVERY:-5}" LOG_EVERY="${LOG_EVERY:-1}"
 # CHECKPOINT_EVERY=0 -> skip the durable DCP resume ckpt (a 32B ckpt = ~475GB of fp32 optim+master;
@@ -38,10 +44,10 @@ export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-0}" CHECKPOINT_KEEP="${CHECKPOINT_K
 export RUN_NAME="${RUN_NAME:-opd_1node_smoke}" MAX_STEPS="${MAX_STEPS:-20}"
 export WANDB_MODE="${WANDB_MODE:-offline}" WANDB_PROJECT="${WANDB_PROJECT:-opd-v2-smoke}"
 
-# ---- to exercise the AGENTIC path instead (closest to the B200 production run) ----
-# The agentic startup guard needs max_traj_tokens >= max(refine_cap, select_cap) + min_gen_room(48000);
-# min_gen_room is NOT env-exposed, so the floor is ~56k even with reduced bundle caps. Set:
-#   export PRODUCER=agentic REFINE_BUNDLE_CAP=8000 SELECT_BUNDLE_CAP=8000
-#   export CONTEXT_LEN=57344 MAX_TRAJ_TOKENS=57344 MICRO=57344 MAX_NEW_TOKENS=49152 TEACHER_CONTEXT_LEN=61440
-# (heavier; if the world-2 trainer OOMs, lower TRAIN_BATCH_TRAJS/MICRO or set TRAINER_NPROC=3. The seed
-#  is built at runtime from the public ycchen/dsflash-proof-distill-v2-test -> needs network on the node.)
+# ---- LIGHTER validation without the dataset: the single_round producer ----
+# single_round has NO min_gen_room floor -> smaller context, no seed/network needed. It draws prompts
+# from the in-repo distill_gen/problems/problems.parquet (NOT dsflash). Use it for a fast plumbing check:
+#   export PRODUCER=single_round
+#   export CONTEXT_LEN=40960 MAX_TRAJ_TOKENS=40960 MICRO=40960 MAX_NEW_TOKENS=36864 TEACHER_CONTEXT_LEN=45056
+# If the world-2 trainer OOMs at 57k agentic: lower MICRO/MAX_TRAJ_TOKENS, drop TRAIN_BATCH_TRAJS, or set
+# TRAINER_NPROC=3 (steal a rollout GPU: ROLLOUT_GPUS=4 ROLLOUT_TP=1 TRAINER_GPUS=5,6,7).

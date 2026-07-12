@@ -141,3 +141,27 @@ Carry the §3 values **verbatim**, changing only the two allowed B200 deltas:
 Everything else — β, LR, weight_sync cadence, admission filter, role mix, staleness — stays exactly
 hers. The `config.py` **defaults are the 7B baseline** (`stage1-v2-7b`, `max_traj=65536`); the 32B run
 is entirely the sbatch overrides.
+
+## 5. Data & checkpoints — everything to reproduce or continue (all public)
+
+OPD is on-policy: there is **no training corpus** — the student self-generates rollouts, scored live.
+The complete input set is just models + the prompt seed + the config, all published:
+
+| what | HF id | notes |
+|---|---|---|
+| Teacher | `deepseek-ai/DeepSeek-V4-Flash` | frozen scorer; hidden dim 4096 |
+| Prompt dataset (agentic seed) | `ycchen/dsflash-proof-distill-v2-test` | `per_problem` config; 1,776 hard AoPS/olympiad problems + DeepSeek proofs |
+| **OPD start** (pre-OPD student) | `ycchen/proof-pilot-checkpoints/step09-softdistill-v2test-32b` | = her `stage1-v2-32b-softdistill-v2test`; ~65 GB bf16 |
+| **OPD final** (delivered 32B) | `ycchen/proof-pilot-checkpoints/step10-opd-32b-s150` | her result after ~150 OPD steps; ~65 GB bf16 |
+| Her resolved config | `ycchen/proof-pilot-datasets/step10-opd-pool-rollouts/agentic_32b_lc140k_v33/config.json` | = `env_v33_b200.sh` (verified, §3) |
+| Her OPD pool + admitted rollouts | `ycchen/proof-pilot-datasets/step10-opd-pool-rollouts/` | archive; for cross-validation, not needed to run |
+
+- **Reproduce** her run → start from **step09** + teacher + dataset + `env_v33_b200.sh`.
+- **Continue training** → warm-start from **step10-opd-32b-s150** + same teacher/dataset/config.
+- **Caveat — warm-start, not bit-exact resume.** The DCP checkpoint (fp32 optimizer + master weights +
+  scheduler) is multi-TB and **not** published (only the bf16 consolidated weights are). Her pool/rollouts
+  are published but not optimizer state. OPD is async-nondeterministic anyway, so exact reproduction is
+  impossible in principle — warm-start from the published weights (fresh optimizer) is the intended path.
+- **Student format:** the deploy-format student `chankhavu/yccchen-olmo3-deploy` (legacy-rope, for
+  rollout + weight-sync) works for both roles in these presets; step09/step10 are the training-format
+  consolidated checkpoints. Convert training→deploy with `deploy/make_olmo3sink_deploy.py` if needed.

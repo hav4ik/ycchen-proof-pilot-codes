@@ -19,6 +19,16 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 
 ## Change log (newest first)
 
+### Smokes default to the production dataset (agentic + dsflash)
+`SEED_SOURCE=ycchen/dsflash-proof-distill-v2-test` is now pinned in every preset. The 8-GPU smoke
+(`env_1node_smoke.sh`) defaults to `PRODUCER=agentic` — the same prove/verify/refine/select loop and
+prompt dataset as production — scaled to the ~57k agentic context floor (reduced bundle caps 8k/8k);
+`single_round` (in-repo `problems.parquet`) remains a documented lighter no-dataset fallback. The 4-GPU
+test stays `single_round` by necessity (agentic's 56k floor won't fit 4×32B; it's a codec check). The
+B200 preset `env_v33_b200.sh` is unchanged behavior — still her exact V33 (130816 ctx, caps 40k/50k,
+batch 64), the pinned seed only makes her existing default explicit. Data provenance + the published
+start/final checkpoints are mapped in [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md).
+
 ### 4×H200 Olmo3-32B←Olmo3-32B test + additive teacher knobs
 Added a 4-GPU (1:1:2) test using an Olmo3-32B teacher (DeepSeek needs TP4). Two additive config knobs
 (both default to her exact values): `OPD_HID_DIM` (teacher hidden dim; default 4096) and `TEACHER_PATH`

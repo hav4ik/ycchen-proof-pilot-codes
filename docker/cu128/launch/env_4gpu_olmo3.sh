@@ -8,6 +8,11 @@
 # (triton sink + return-hidden + bf16), NOT the DeepSeek run_teacher.sh.
 # REQUIRED: STUDENT_PATH (deploy-format Olmo3-32B), RUN_DIR (scratch).
 
+# Producer = single_round here BY NECESSITY, not choice: the dsflash dataset is only reachable via the
+# AGENTIC producer, which has a hard min_gen_room(48000)+bundle-caps ~= 56k context floor that will NOT
+# fit a 32B trainer on 2 GPUs. This 4-GPU test validates the Olmo3 hidden-extract + W_rot codec (self-
+# distill JSD ~= 0) — problem-set-independent — so single_round (in-repo problems.parquet) is correct.
+# The dsflash/agentic dataset path is exercised by the 8-GPU smoke (env_1node_smoke.sh) instead.
 export PRODUCER="${PRODUCER:-single_round}"
 export ATTN_IMPL="${ATTN_IMPL:-olmo3_sink_fa2}"
 export STUDENT_PATH="${STUDENT_PATH:?set to the STUDENT Olmo3-32B deploy dir (checkpoint B)}"

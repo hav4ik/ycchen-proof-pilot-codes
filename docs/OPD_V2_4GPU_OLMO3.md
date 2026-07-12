@@ -36,7 +36,11 @@ docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
 ```
 
 **Datasets:** none to download — OPD self-generates its rollouts; the single_round prompts are the
-in-repo `distill_gen/problems/problems.parquet` (9,834 problems, ships in the image).
+in-repo `distill_gen/problems/problems.parquet` (9,834 problems, ships in the image). This test uses
+`single_round` **by necessity**: the production `dsflash-proof-distill-v2-test` dataset is only reachable
+via the agentic producer, whose ~56k context floor won't fit a 32B trainer on 2 GPUs. It's a codec /
+hidden-extract correctness check (problem-set-independent); the dataset path is validated by the 8-GPU
+smoke instead.
 
 ## Run
 
