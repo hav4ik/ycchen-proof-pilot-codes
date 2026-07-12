@@ -31,12 +31,28 @@ df -h /data 2>/dev/null || df -h /                                  # need ~1 TB
 If GPUs aren't visible in docker, host RAM < ~400 GB, or disk < ~1 TB → **stop**; those are hardware
 gaps, no config fixes them. (The `docker run … nvidia-smi` also doubles as your image-pull test.)
 
-## Step 1 — get the image
+## Step 1 — get the image (and verify the bring-up fixes are in it)
 
 ```bash
-docker pull chankhavu/ycchen-opd:cu128          # digest sha256:94fa5bd5…
+docker pull chankhavu/ycchen-opd:cu128
+# current digest: sha256:5c36d05b045426c6356cc7925f9fe4a556d1011a3877660b953c11bdd893773c
+docker image inspect chankhavu/ycchen-opd:cu128 --format '{{index .RepoDigests 0}}'   # must match ^
 # air-gapped node instead? on the dev box:  docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
 ```
+
+**Verify the two real-hardware fixes are present** (a stale/cached image without them reproduces the
+early crashes — CUDA "driver too old" and a `rope_theta` KeyError):
+```bash
+docker run --rm chankhavu/ycchen-opd:cu128 bash -lc '
+  ls /opt/cuda13-compat/libcuda.so* >/dev/null && echo "OK: CUDA-13 forward-compat lib present"
+  for s in run_teacher run_rollout; do grep -q cuda13-compat /opt/opd/opd_serve/$s.sh && echo "OK: $s.sh forward-compat preamble"; done
+  SGL=$(/opt/venv/serve/bin/python -c "import sglang,os;print(os.path.dirname(sglang.__file__))")
+  grep -q "_rope_params.get" "$SGL/srt/models/olmo2.py" && echo "OK: rope_theta fix"'
+```
+Why they matter here: this node's driver (CUDA 12.8) can't natively run the CUDA-13 sglang serve venv —
+the forward-compat lib bridges it (loaded automatically when the driver is < 13); the `rope_theta` fix
+lets the Olmo3 **student** load. Both were found + fixed on a live H200 (see
+[OPD_V2_H200_BRINGUP_FIXES.md](OPD_V2_H200_BRINGUP_FIXES.md)).
 
 ## Step 2 — paths + download the 3 model dirs
 
