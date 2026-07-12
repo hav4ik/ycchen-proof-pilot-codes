@@ -20,39 +20,64 @@ world 2 → GPU 2-3 · orchestrator CPU.
 - ⚠️ `silence09/DeepSeek-V4-Pro-Tiny` **cannot** be used: its hidden=500 fails the codec's hard
   `d % 32 == 0` assert (`_common/hidden_codec.py:52`).
 
-## Download the model(s)
+## Step 0 — image + preflight (you run *inside* the container on these instances)
 
-No DeepSeek here — teacher and student are Olmo3-32B. Download the student (public), and a **second**
-checkpoint only if you want real distillation (else it self-distills):
-
+Pull the image with all the H200 bring-up fixes (CUDA-13 forward-compat + `rope_theta`), then verify:
 ```bash
-export MODELS=/data/models; mkdir -p "$MODELS"
-# student (checkpoint B) — public, no token
-docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
-  hf download chankhavu/yccchen-olmo3-deploy --local-dir /models/olmo3-32b-ckptB
-# teacher (checkpoint A) — OPTIONAL; a different Olmo3-32B ckpt for a real (non-zero) JSD signal
-# docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
-#   hf download <your/olmo3-32b-ckptA> --local-dir /models/olmo3-32b-ckptA
+docker pull chankhavu/ycchen-opd:cu128
+# @ sha256:5c36d05b045426c6356cc7925f9fe4a556d1011a3877660b953c11bdd893773c
+```
+```bash
+ls /opt/cuda13-compat/libcuda.so* && grep -c cuda13-compat /opt/opd/opd_serve/run_teacher_olmo3.sh  # forward-compat present (expect 1)
+nvidia-smi -L                                                                                         # 4× H200
 ```
 
-**Datasets:** none to download — OPD self-generates its rollouts; the single_round prompts are the
-in-repo `distill_gen/problems/problems.parquet` (9,834 problems, ships in the image). This test uses
-`single_round` **by necessity**: the production `dsflash-proof-distill-v2-test` dataset is only reachable
-via the agentic producer, whose ~56k context floor won't fit a 32B trainer on 2 GPUs. It's a codec /
-hidden-extract correctness check (problem-set-independent); the dataset path is validated by the 8-GPU
-smoke instead.
+## Step 1 — download the two checkpoints (real distillation)
 
-## Run
+- **Student (being trained)** = `opd-32b-v33-s150` — the OPD-final model. It lives in a **subfolder** of
+  the deploy bundle, so use `--include`.
+- **Teacher (frozen, provides hidden)** = `chankhavu/yccchen-olmo3-deploy` — the pre-OPD deploy student.
+
+Both public, no token, both olmo3 hidden-5120. ~130 GB total.
+```bash
+export MODELS=/models
+# student: opd-32b-v33-s150 (subfolder of the bundle repo)
+hf download ycchen/proof-pilot-deploy-bundle --include "opd-32b-v33-s150/*" --local-dir /models/opd-s150
+# teacher: the deploy student
+hf download chankhavu/yccchen-olmo3-deploy --local-dir /models/teacher-deploy
+# sanity
+ls /models/opd-s150/opd-32b-v33-s150/config.json /models/teacher-deploy/config.json
+```
+*(For a **self-distill** codec check instead — JSD ≈ 0 — download only one model and point both roles at it.)*
+
+**Datasets:** none — OPD self-generates its rollouts; single_round prompts ship in-repo
+(`distill_gen/problems/problems.parquet`). This test is `single_round` by necessity (agentic's ~56k
+floor won't fit a 32B trainer on 2 GPUs); it's a codec / hidden-extract correctness check,
+problem-set-independent. The dsflash dataset path is validated by the 8-GPU smoke instead.
+
+## Step 2 — run (student = s150, teacher = deploy)
+
+You're already inside the container, so run the launcher directly (no `docker run` wrapper):
+```bash
+STUDENT_PATH=/models/opd-s150/opd-32b-v33-s150 \
+TEACHER_MODEL=/models/teacher-deploy \
+RUN_DIR=/runs/opd_4gpu_distill \
+bash -lc 'source /opt/opd/launch/env_4gpu_olmo3.sh && bash /opt/opd/launch/run_1node.sh'
+```
+The preset supplies the rest: `TEACHER_PATH=$TEACHER_MODEL`, `OPD_HID_DIM=5120`, `run_teacher_olmo3.sh`,
+layout **teacher[0] · rollout[1] · trainer[2,3]**, single_round 24k. Two different checkpoints →
+**non-zero JSD** (real distillation).
+
+*(From a host with Docker instead of in-container: wrap the same env in
+`docker run --rm -it --gpus all --ipc=host --shm-size=64g -v /data/models:/models -v /data/runs:/runs -e STUDENT_PATH=… -e TEACHER_MODEL=… -e RUN_DIR=… chankhavu/ycchen-opd:cu128 bash -lc '…'`.)*
+
+## Watch
 
 ```bash
-docker run --rm -it --gpus all --ipc=host --shm-size=64g \
-  -v /data/models:/models -v /data/runs:/runs \
-  -e STUDENT_PATH=/models/olmo3-32b-ckptB \
-  -e TEACHER_MODEL=/models/olmo3-32b-ckptA \
-  -e RUN_DIR=/runs/opd_4gpu_olmo3 \
-  chankhavu/ycchen-opd:cu128 \
-  bash -lc 'source /opt/opd/launch/env_4gpu_olmo3.sh && bash /opt/opd/launch/run_1node.sh'
+grep -m1 cuda13-compat /runs/opd_4gpu_distill/teacher.log     # forward-compat fired on the teacher
+tail -f /runs/opd_4gpu_distill/orchestrator.log              # per-step metrics
 ```
+Olmo3-32B bf16 has no MoE cold-start, so the health gate clears in ~2–5 min (vs 10–20 for DeepSeek).
 
 - **Two checkpoints** → set `TEACHER_MODEL` (checkpoint A) different from `STUDENT_PATH` (checkpoint B):
   real distillation, non-zero JSD.
@@ -74,6 +99,8 @@ All-32B on 4 GPUs is tighter than the 8-GPU test (teacher bf16 ~64 GB on 1 H200;
 trainer 32B world-2 + CPU offload). If it's tight:
 - trainer OOM → lower `-e MICRO=16384 -e MAX_TRAJ_TOKENS=16384` or `-e TRAIN_BATCH_TRAJS=2`.
 - teacher OOM at 28k → lower `-e TEACHER_MEMFRAC=0.80 -e TEACHER_CONTEXT_LEN=20480`.
-- first-run check: confirm `run_teacher_olmo3.sh` actually surfaces hidden states (the one unverified
-  assumption — that the baked `olmo2.py` returns hidden via `--enable-return-hidden-states`). If `/score`
-  returns empty hidden, that's the thing to fix (olmo2.py capture-hidden hook), not the config.
+- **hidden export** — verified *in code* (`olmo2.py:501-511` returns the post-norm hidden into
+  `logits_processor` with no `before_norm`, so `--enable-return-hidden-states` yields the correct
+  `[seq,5120]`; the spool/`/score` patches are model-agnostic and baked), but **not yet GPU-proven for
+  Olmo3**. The run itself is the proof: self-distill `train/loss ≈ 0`, or a sane trending-down loss on two
+  checkpoints. If `/score` returns *empty* hidden, the fix is the olmo2.py capture-hidden path, not config.
