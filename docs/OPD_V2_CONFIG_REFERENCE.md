@@ -111,6 +111,14 @@ RUN_NAME=agentic_32b_lc140k_v33  MAX_STEPS=100000  WANDB_PROJECT=opd-v2-agentic
 knobs off**. So her best run is **canonical β=1 reverse-KL OPD**, agentic producer, `length` admission
 filter, 140k ctx / 128k gen, 32B student.
 
+**Ground-truth cross-check.** Her exact *resolved* production config is published at
+`ycchen/proof-pilot-datasets` → `step10-opd-pool-rollouts/agentic_32b_lc140k_v33/config.json` (that
+dataset is her Stage-2 reproducibility artifacts, incl. the OPD pool + admitted rollout shards; the OPD
+seed is still `dsflash-proof-distill-v2-test`, unchanged). Verified field-by-field against
+`docker/cu128/launch/env_v33_b200.sh`: **identical except `attn` (`olmo3_sink_fa3` → `olmo3_sink_fa2`),
+our one intended B200 delta.** Confirms β=1 revKL, V34 off, `max_staleness=0`, seed
+`dsflash-proof-distill-v2-test`.
+
 Notable non-default choices:
 - `WEIGHT_SYNC_EVERY=4` (not the default 1) — with `TARGET_INFLIGHT=512` and long-CoT gen time, this
   sets the effective (unbounded but pipeline-limited) staleness.
