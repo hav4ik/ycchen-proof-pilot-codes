@@ -27,13 +27,24 @@ FROM ${BASE}
 LABEL org.opencontainers.image.title="ycchen-opd" \
       org.opencontainers.image.description="Yi-Chia Chen OPD v2 (trainer+orchestrator+rollout+teacher) on CUDA 12.8 for B200/sm_100" \
       com.nvidia.cuda.version="12.8" \
-      ai.opd.target-arch="sm_100 (B200); also sm_80/86/90" \
+      ai.opd.target-arch="sm_90 (H200) + sm_100 (B200)" \
       ai.opd.trainer-sink="olmo3_sink_fa2 (post-correction on stock FA2; no FA3)" \
       ai.opd.rollout-attn-backend="triton (sink-correct prefill+decode)"
 
 # The base auto-runs an olmocore training bootstrap as its ENTRYPOINT — neutralize it for this image.
 ENTRYPOINT []
 SHELL ["/bin/bash", "-lc"]
+
+# nvcc "just in case" — the runtime base has no CUDA compiler. Add the cu128 nvcc + cudart dev headers so
+# kernels can be (re)built inside the container if ever needed. Not on the training hot path (~0.7GB).
+RUN set -eux; \
+    apt-get update; apt-get install -y --no-install-recommends wget ca-certificates; \
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb; \
+    dpkg -i cuda-keyring_1.1-1_all.deb; rm -f cuda-keyring_1.1-1_all.deb; \
+    apt-get update; apt-get install -y --no-install-recommends cuda-nvcc-12-8 cuda-cudart-dev-12-8; \
+    rm -rf /var/lib/apt/lists/*
+ENV CUDA_HOME=/usr/local/cuda-12.8 \
+    PATH=/usr/local/cuda-12.8/bin:${PATH}
 
 # opd_v2 runtime deps (trainer + orchestrator). torch/flash_attn already in base.
 # transformers is PINNED to Yi-Chia's 5.9.0: the base ships 5.13.0, which broke olmo3_sink's rope
@@ -44,20 +55,30 @@ RUN pip install --no-cache-dir \
         aiohttp wandb pyarrow polars datasets safetensors einops sentencepiece \
         pydantic loguru psutil scipy tqdm huggingface-hub accelerate
 
-# flash-attn: STOCK prebuilt, ALL-ARCH. olmo3_sink_fa2 adds the sink OUTSIDE the kernel (Yi-Chia's
-# (out,lse) re-normalization), so we NEVER patch/build the kernel — a stock wheel that includes the
-# target arch (sm_100 for B200; sm_80/86/90 to also test on Ampere/Hopper) is all that's needed.
-# Set FLASH_ATTN_WHEEL to an explicit all-arch wheel URL for a base-independent pin. Build asserts the
-# kernel is unmodified; the smoke's real FA2 call is the per-arch runtime guard (fails "no kernel image").
+# flash-attn: STOCK, built for sm_90 (H200) + sm_100 (B200) so olmo3_sink_fa2 runs on both. The runtime
+# base ships a Blackwell-ONLY wheel (sm_100/120) -> "no kernel image" on H200 (sm_90).
+# We replace it with a STOCK, UNMODIFIED wheel (the sink is a post-correction OUTSIDE the kernel -> never
+# patched) built for torch 2.10 ABI by docker/cu128/build_fa2_wheel.sh. **Build the wheel FIRST:**
+#   OUT=docker/cu128/wheels bash docker/cu128/build_fa2_wheel.sh
+# (or set --build-arg FLASH_ATTN_WHEEL=<url> to a multi-arch wheel). The assert fails LOUD if sm_90/sm_100
+# are missing, so a stale/Blackwell-only wheel can't slip through.
 ARG FLASH_ATTN_WHEEL=""
+COPY docker/cu128/wheels/ /tmp/fa2wheels/
 RUN set -eux; \
-    if [ -n "${FLASH_ATTN_WHEEL}" ]; then pip install --no-cache-dir --force-reinstall --no-deps "${FLASH_ATTN_WHEEL}"; fi; \
+    WHL="$(ls /tmp/fa2wheels/flash_attn-*.whl 2>/dev/null | head -1 || true)"; \
+    if   [ -n "${FLASH_ATTN_WHEEL}" ]; then pip install --no-cache-dir --force-reinstall --no-deps "${FLASH_ATTN_WHEEL}"; \
+    elif [ -n "$WHL" ];                then pip install --no-cache-dir --force-reinstall --no-deps "$WHL"; fi; \
+    rm -rf /tmp/fa2wheels; \
     python - <<'PY'
-import flash_attn, inspect
+import flash_attn, inspect, re
 from flash_attn import flash_attn_varlen_func
 params = inspect.signature(flash_attn_varlen_func).parameters
 assert not any(("sink" in p) or ("aux" in p) for p in params), "expected STOCK FA2 (no in-kernel sink)"
-print("flash-attn", flash_attn.__version__, "= stock/unmodified; olmo3_sink_fa2 applies the sink via post-correction")
+import flash_attn_2_cuda as c
+arches = sorted(set(a.decode() for a in re.findall(rb"sm_[0-9]+", open(c.__file__, "rb").read())))
+assert "sm_90"  in arches, f"flash-attn missing Hopper sm_90 (H200): {arches} — run docker/cu128/build_fa2_wheel.sh"
+assert "sm_100" in arches, f"flash-attn missing Blackwell sm_100 (B200): {arches}"
+print("flash-attn", flash_attn.__version__, "stock; arches:", arches)
 PY
 
 # Yi-Chia's repo (imports are sys.path-from-__file__, run in place) + the tests.
