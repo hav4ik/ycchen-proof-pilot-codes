@@ -174,8 +174,8 @@ torch.float8_e4m3fn` + `SWAKVPool`):
   `CUDA_GRAPH_MAX_BS`=`MAXRUN` (setting MAXRUN=64 auto-captures up to 64).
 - swa_ratio: 0.2 is well-tuned (swa 942k supports ~230 concurrent windows, far above what's needed; full pool
   maximized). If concurrency is far below 230 you could try r=0.15 for ~9% more full pool, marginal.
-- **Production run**: `examples/run_agentic_mn.sbatch` already bakes in this set (ctx131072 / e4m3 / swa0.2 /
-  MAXRUN64 / teacher memfrac0.5).
+- **Production run**: `examples/run_agentic_mn_32b.sbatch` bakes in this set for the 32B run (ctx130816 /
+  e4m3 / swa0.2 / MAXRUN64 / teacher memfrac0.6).
 
 ## 6. Files
 

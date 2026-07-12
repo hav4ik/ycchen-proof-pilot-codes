@@ -25,8 +25,10 @@ Kaggle submission (kaggle/notebook/proof_pilot_submit_int4mlp.ipynb)
 ```
 
 **Teacher / donor:** DeepSeek-V4-Flash (with V4-Pro used for some higher-quality data).
-**Evaluation (IMO-ProofBench v2, agentic loop):** OPD-32B scores **4.48 / 7** overall under an
-independent Claude grader; the DeepSeek teacher ceiling is ~4.6–4.8 / 7 (see `evaluation/`).
+**Evaluation (IMO-ProofBench v2, agentic loop):** the same OPD-32B final proofs score **4.48 / 7**
+under an independent Claude grader with SymPy/brute-force checking and **3.808 / 7** under the
+calibrated DeepSeek-V4-Flash `high_notool` two-pass grader. Under that same Flash grader, the
+DeepSeek-V4-Flash teacher scores **4.83 / 7** (see `evaluation/`).
 
 ---
 

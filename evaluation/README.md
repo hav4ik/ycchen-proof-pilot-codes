@@ -41,6 +41,13 @@ python harness/grade_proofs.py --run runs/myrun
 ```
 
 ## Headline results
-- Teacher ceiling: DeepSeek-V4-Flash best-of-4 **4.64/7**.
-- Agentic single output **4.83** (beats best-of-4 oracle); refine is the quality engine (+0.92/proof).
-- Delivered **OPD-32B agentic 4.48/7** (Basic 6.13 / Advanced 2.83; pre-IMO 7.0 → IMO-hard 1.3).
+- Teacher ceiling: DeepSeek-V4-Flash best-of-4 **4.64/7** under the calibrated Flash grader.
+- Teacher agentic single output: **4.83/7** under the Flash grader (beats best-of-4); refine is the
+  quality engine (+0.92/proof).
+- Delivered OPD-32B, same 60 final proofs:
+  - **4.48/7** under the independent Claude grader with SymPy/brute-force checking
+    (Basic 6.13 / Advanced 2.83; pre-IMO 7.0 → IMO-hard 1.3).
+  - **3.808/7** under the calibrated DeepSeek-V4-Flash `high_notool` two-pass grader
+    (Basic 5.600 / Advanced 2.017; fully correct 27/60).
+- Same-grader agentic comparison: OPD student **3.808** vs Flash teacher **4.830** vs Pro teacher
+  **5.310**. See `results/olmo3_32b_proofbench/FLASH_GRADER.md`.

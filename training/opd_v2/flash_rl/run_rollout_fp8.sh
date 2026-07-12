@@ -21,7 +21,7 @@
 #     enabled together, update_weights_from_disk 6/6 success, reload->reload bit-exact, e4m3 keeps FA3. A TP8 head divides evenly and also works.
 #   - TP4 + fp8 + e4m3 + SWA r=0.2 + ctx131072 + memfrac0.85 (measured 2026-06-20): hybrid SWA pool enabled,
 #     full_layer_tokens=4,711,012 / swa_layer_tokens=942,202 (115GB, avail 20.6GB) -> long sequences bind the full pool:
-#     conc*avg_len <= 4.71M (avg 64k -> ~72 per replica). OPD agentic sets MAXRUN=64 (see run_agentic_mn.sbatch).
+#     conc*avg_len <= 4.71M (avg 64k -> ~72 per replica). OPD agentic sets MAXRUN=64 (see examples/run_agentic_mn_32b.sbatch).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"

@@ -5,11 +5,14 @@ distillation) on **all 60 problems of IMO-ProofBench v2**, using the prove→ver
 agentic loop. Each problem's final proof is in [`proofs/`](proofs/); the per-problem scores are in
 [`SCORES.md`](SCORES.md) / [`scores.tsv`](scores.tsv).
 
-> ⚠️ Scoring uses the **Claude grader (with sympy / brute-force checking)**, which is **not** the same
-> as the **flash high_notool grader** used for the teacher ceiling in this repo, so it **cannot be
-> directly subtracted/compared** against teacher numbers like 4.64/4.83 (see §teacher comparison below).
+> This directory records two grading views of the **same 60 final proofs**: an independent
+> **Claude grader with SymPy/brute-force checking** and the calibrated **DeepSeek-V4-Flash
+> `high_notool` two-pass grader**. Scores from different grader families are not directly
+> comparable; teacher comparisons below are made within the same grader column.
 
 ## Results
+
+### Independent Claude grader
 
 | Split | n | Mean (/7) | solved (≥6) |
 |---|---|---|---|
@@ -36,6 +39,23 @@ guesses the right final answer, but at **the single most critical step** (infini
 identity, exhaustive case analysis, an involution lemma, …) it switches to hand-waving or states a
 **false lemma refutable by counterexample**, which the grader catches with sympy/brute-force → 1 point.
 On easy/pre-IMO problems it almost always produces a complete solution (full marks on pre-IMO).
+
+
+### DeepSeek-V4-Flash grader
+
+The same final proofs were also scored by `deepseek-v4-flash` using the repository's calibrated
+`high_notool` ranking configuration, Appendix B.5 rubric, and two passes per proof:
+
+| Split | n | Mean (/7) |
+|---|---:|---:|
+| **Overall** | 60 | **3.808** |
+| Basic | 30 | **5.600** |
+| Advanced | 30 | **2.017** |
+
+The almost-correct-or-better rate is **31/60 (51.7%)**, the fully-correct rate is **27/60 (45.0%)**,
+and the two passes agree exactly on **53/60 (88.3%)** proofs. See
+[`FLASH_GRADER.md`](FLASH_GRADER.md) for the full breakdown and
+[`flash_scores.tsv`](flash_scores.tsv) for both pass scores on every problem.
 
 ## Method
 
@@ -70,13 +90,17 @@ evaluation, so it is directly comparable:
 
 | System | Method | Claude grader | flash grader |
 |---|---|---|---|
-| **OLMo 3 32B (OPD student, s200)** | agentic select | **4.48** | — |
+| **OLMo 3 32B (OPD student, s200)** | agentic select | **4.48** | **3.808** |
 | DeepSeek-V4-Flash (teacher) | agentic select | **5.30** | 4.83 |
 | DeepSeek-V4-Pro | agentic select | 5.32 | 5.31 |
 
-**Under the same pipeline + the same Claude grader method: student 4.48 vs flash teacher 5.30 → about
-−0.82** (a genuinely comparable gap, not an artifact of different graders). The gap is **concentrated in
-medium/hard**; on easy/pre-IMO the student is already near the ceiling (pre-IMO 7.0).
+Under the same pipeline and grader, the comparable gaps are:
+
+- Claude grader: student **4.48** vs Flash teacher **5.30** → **−0.82**.
+- Flash grader: student **3.808** vs Flash teacher **4.830** → **−1.022**.
+
+The gap is concentrated in medium/hard; on easy/pre-IMO the student is already near the ceiling
+(pre-IMO 7.0 under both graders).
 
 Caveats: (1) the two Claude gradings are **different batches** (possible cross-batch variance); (2) the
 teacher run was a random pro/flash A/B **blind** grading, whereas this evaluation is not blind; (3) the
@@ -107,11 +131,15 @@ python deploy/make_olmo3sink_deploy.py \
 python kaggle/serve/enable_swa_config.py outputs/agentic_32b_lc140k_v33-s200-deploy
 # 2) SGLang TP4 fp8 serve (GPU 0-3): see tmp/pb_agentloop/serve_tp4.sh
 # 3) run the agentic loop (math_3r.solve_problem, 6/2/3/4, 128k, temp 1.0) -> save all stages
-# 4) Claude grader (one agent per 6 problems) with 0/1/6/7 + sympy verification
+# 4) Grade the same responses with:
+#    (a) Claude agents using 0/1/6/7 + SymPy/brute-force verification
+#    (b) grade_proofs.py using deepseek-v4-flash, high_notool, --passes 2
 ```
 
 ## Files
 
-- [`SCORES.md`](SCORES.md) — per-problem score table (links to each proof)
-- [`scores.tsv`](scores.tsv) — machine-readable scores
+- [`SCORES.md`](SCORES.md) — per-problem Claude-grader score table (links to each proof)
+- [`scores.tsv`](scores.tsv) — machine-readable Claude-grader scores
+- [`FLASH_GRADER.md`](FLASH_GRADER.md) — Flash grader configuration, aggregate results, and interpretation
+- [`flash_scores.tsv`](flash_scores.tsv) — per-problem Flash pass-0/pass-1 scores and their means
 - [`proofs/PB-*.md`](proofs/) — for each of the 60 problems: the problem + the model's final proof + score + grader note

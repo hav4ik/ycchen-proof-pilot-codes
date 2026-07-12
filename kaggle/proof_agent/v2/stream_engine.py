@@ -52,7 +52,8 @@ class StreamClient:
         except Exception:  # noqa: BLE001
             return False
 
-    async def stream_chat(self, messages, *, max_tokens, temperature, top_p, seed, timeout):
+    async def stream_chat(self, messages, *, max_tokens, temperature, top_p, seed, timeout,
+                          top_k=None):
         """Async-generate SSE events: dicts with optional rid / reasoning / content / finish /
         usage. The caller drives this and decides when to stop (breaking the loop closes the
         stream -> sglang aborts the running request)."""
@@ -61,6 +62,8 @@ class StreamClient:
             "temperature": temperature, "top_p": top_p, "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if top_k is not None:
+            payload["top_k"] = top_k   # sglang chat-completions extension
         if seed is not None:
             payload["seed"] = seed
         async with self._http.stream("POST", f"{self.base}/v1/chat/completions",
@@ -86,12 +89,14 @@ class StreamClient:
                     ev["finish"] = ch.get("finish_reason")
                 yield ev
 
-    async def generate_raw(self, input_ids, *, max_new_tokens, temperature, top_p, timeout):
+    async def generate_raw(self, input_ids, *, max_new_tokens, temperature, top_p, timeout,
+                           top_k=None):
         """Native /generate over explicit input_ids (force-close continuation). NOTE: this
         build's /generate 500s on `seed`, so seed is never forwarded here (see v1 client.py)."""
-        payload = {"input_ids": input_ids,
-                   "sampling_params": {"temperature": temperature, "top_p": top_p,
-                                       "max_new_tokens": max_new_tokens}}
+        sp = {"temperature": temperature, "top_p": top_p, "max_new_tokens": max_new_tokens}
+        if top_k is not None:
+            sp["top_k"] = top_k
+        payload = {"input_ids": input_ids, "sampling_params": sp}
         r = await self._http.post(f"{self.base}/generate", json=payload, timeout=timeout)
         r.raise_for_status()
         out = r.json()
@@ -164,10 +169,11 @@ class StreamingEngine:
                  call_cap: int = 100_000, max_tokens: int = 100_000,
                  finalize_reserve_s: float = _FINALIZE_RESERVE_S,
                  role_temps: dict | None = None, seed_base: int = 1234,
-                 deadline: float | None = None):
+                 deadline: float | None = None, top_k: int | None = None):
         self.client = client
         self.temperature = temperature
         self.top_p = top_p
+        self.top_k = top_k
         self.call_cap = call_cap
         self.max_tokens = max_tokens
         self.finalize_reserve_s = finalize_reserve_s
@@ -227,7 +233,7 @@ class StreamingEngine:
 
         try:
             stream = self.client.stream_chat(messages, max_tokens=cap, temperature=temp,
-                                             top_p=self.top_p, seed=seed,
+                                             top_p=self.top_p, seed=seed, top_k=self.top_k,
                                              timeout=remaining + 30.0)
             async for ev in stream:
                 rid = ev.get("rid") or rid
@@ -335,6 +341,7 @@ class StreamingEngine:
         rem = self._remaining()
         return await self.client.generate_raw(list(prefix) + cont, max_new_tokens=cap,
                                                temperature=temp, top_p=self.top_p,
+                                               top_k=self.top_k,
                                                timeout=(rem - 5.0 if rem != float("inf") else 600.0))
 
     def _apply_salvage(self, rec, out, label):

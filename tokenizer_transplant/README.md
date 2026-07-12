@@ -19,7 +19,10 @@ anchors. Used here to give OLMo 3 the DeepSeek-V4 vocabulary (the distillation l
 ## Usage
 ```bash
 # Edit a config to point base/donor/out at your local model dirs, then:
-python -m tokenizer_transplant tokenizer_transplant/configs/olmo3_think_7b__deepseek_v4_flash.yaml
+python -m tokenizer_transplant full --config tokenizer_transplant/configs/olmo3_think_7b__deepseek_v4_flash.yaml
+
+# 32B production transplant (the checkpoint behind step01 of the final pipeline):
+python -m tokenizer_transplant full --config tokenizer_transplant/configs/olmo3_think_32b__deepseek_v4_flash.yaml
 ```
 
 ## Notes

@@ -1,0 +1,61 @@
+problem_id\tsubset\tlevel\tcategory\tpass_0\tpass_1\tmean_score
+PB-Advanced-001\tadvanced\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Advanced-002\tadvanced\tIMO-medium\tCombinatorics\t0\t0\t0
+PB-Advanced-003\tadvanced\tIMO-hard\tGeometry\t0\t0\t0
+PB-Advanced-004\tadvanced\tIMO-easy\tCombinatorics\t7\t6\t6.5
+PB-Advanced-005\tadvanced\tIMO-medium\tGeometry\t0\t0\t0
+PB-Advanced-006\tadvanced\tIMO-hard\tAlgebra\t0\t0\t0
+PB-Advanced-007\tadvanced\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Advanced-008\tadvanced\tIMO-medium\tNumber theory\t0\t0\t0
+PB-Advanced-009\tadvanced\tIMO-hard\tGeometry\t0\t0\t0
+PB-Advanced-010\tadvanced\tIMO-medium\tGeometry\t0\t0\t0
+PB-Advanced-011\tadvanced\tIMO-medium\tAlgebra\t0\t0\t0
+PB-Advanced-012\tadvanced\tIMO-hard\tNumber theory\t1\t0\t0.5
+PB-Advanced-013\tadvanced\tIMO-easy\tAlgebra\t0\t0\t0
+PB-Advanced-014\tadvanced\tIMO-medium\tCombinatorics\t7\t7\t7
+PB-Advanced-015\tadvanced\tIMO-hard\tGeometry\t0\t0\t0
+PB-Advanced-016\tadvanced\tIMO-easy\tGeometry\t0\t0\t0
+PB-Advanced-017\tadvanced\tIMO-easy\tNumber theory\t7\t6\t6.5
+PB-Advanced-018\tadvanced\tIMO-hard\tCombinatorics\t0\t0\t0
+PB-Advanced-019\tadvanced\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Advanced-020\tadvanced\tIMO-medium\tNumber theory\t0\t0\t0
+PB-Advanced-021\tadvanced\tIMO-hard\tCombinatorics\t0\t0\t0
+PB-Advanced-022\tadvanced\tIMO-easy\tGeometry\t0\t6\t3
+PB-Advanced-023\tadvanced\tIMO-medium\tCombinatorics\t0\t0\t0
+PB-Advanced-024\tadvanced\tIMO-hard\tAlgebra\t1\t1\t1
+PB-Advanced-025\tadvanced\tIMO-easy\tNumber theory\t7\t7\t7
+PB-Advanced-026\tadvanced\tIMO-medium\tAlgebra\t0\t0\t0
+PB-Advanced-027\tadvanced\tIMO-hard\tCombinatorics\t0\t0\t0
+PB-Advanced-028\tadvanced\tIMO-easy\tGeometry\t7\t7\t7
+PB-Advanced-029\tadvanced\tIMO-medium\tNumber theory\t1\t1\t1
+PB-Advanced-030\tadvanced\tIMO-hard\tCombinatorics\t0\t0\t0
+PB-Basic-001\tbasic\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Basic-002\tbasic\tpre-IMO\tAlgebra\t7\t7\t7
+PB-Basic-003\tbasic\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Basic-004\tbasic\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Basic-005\tbasic\tIMO-easy\tAlgebra\t7\t7\t7
+PB-Basic-006\tbasic\tIMO-medium\tAlgebra\t0\t0\t0
+PB-Basic-007\tbasic\tIMO-medium\tAlgebra\t7\t7\t7
+PB-Basic-008\tbasic\tpre-IMO\tAlgebra\t7\t7\t7
+PB-Basic-009\tbasic\tIMO-easy\tCombinatorics\t1\t1\t1
+PB-Basic-010\tbasic\tIMO-easy\tCombinatorics\t7\t7\t7
+PB-Basic-011\tbasic\tIMO-easy\tCombinatorics\t7\t7\t7
+PB-Basic-012\tbasic\tIMO-medium\tCombinatorics\t6\t7\t6.5
+PB-Basic-013\tbasic\tpre-IMO\tCombinatorics\t7\t7\t7
+PB-Basic-014\tbasic\tpre-IMO\tCombinatorics\t7\t7\t7
+PB-Basic-015\tbasic\tpre-IMO\tCombinatorics\t7\t7\t7
+PB-Basic-016\tbasic\tpre-IMO\tCombinatorics\t7\t7\t7
+PB-Basic-017\tbasic\tpre-IMO\tNumber theory\t7\t7\t7
+PB-Basic-018\tbasic\tpre-IMO\tNumber theory\t7\t7\t7
+PB-Basic-019\tbasic\tIMO-easy\tNumber theory\t7\t7\t7
+PB-Basic-020\tbasic\tIMO-easy\tNumber theory\t7\t7\t7
+PB-Basic-021\tbasic\tIMO-easy\tNumber theory\t0\t0\t0
+PB-Basic-022\tbasic\tIMO-easy\tNumber theory\t6\t6\t6
+PB-Basic-023\tbasic\tIMO-medium\tNumber theory\t1\t7\t4
+PB-Basic-024\tbasic\tIMO-medium\tNumber theory\t7\t7\t7
+PB-Basic-025\tbasic\tIMO-easy\tGeometry\t7\t7\t7
+PB-Basic-026\tbasic\tIMO-medium\tGeometry\t0\t0\t0
+PB-Basic-027\tbasic\tIMO-easy\tGeometry\t7\t7\t7
+PB-Basic-028\tbasic\tIMO-medium\tGeometry\t0\t7\t3.5
+PB-Basic-029\tbasic\tIMO-medium\tGeometry\t0\t0\t0
+PB-Basic-030\tbasic\tIMO-easy\tGeometry\t7\t7\t7

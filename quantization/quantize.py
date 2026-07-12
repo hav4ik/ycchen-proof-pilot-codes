@@ -38,8 +38,10 @@ def build_recipe(method: str, scheme: str, kv_cache_scheme=None):
     from llmcompressor.modifiers.quantization import GPTQModifier, QuantizationModifier
 
     if method == "gptq":
+        # actorder pinned explicitly: the shipped GPTQ target was produced with static
+        # activation ordering (llm-compressor 0.16.0 default); don't rely on the default.
         return GPTQModifier(targets="Linear", scheme=scheme, ignore=IGNORE,
-                            kv_cache_scheme=kv_cache_scheme)
+                            actorder="static", kv_cache_scheme=kv_cache_scheme)
     if method == "awq":
         from llmcompressor.modifiers.awq import AWQModifier
         return AWQModifier(targets="Linear", scheme=scheme, ignore=IGNORE)

@@ -28,9 +28,10 @@ class ProofAgent:
     def __init__(self, base_url: str, model_path: str, *, temperature: float = 0.6,
                  top_p: float = 0.95, max_tokens: int = 128_000, concurrency: int = 16,
                  est_tps: float = 35.0, call_cap: int = 32_000, salvage: bool = True,
-                 salvage_tokens: int = 16_000, verify_temp: float = 1.0, select_temp: float = 0.2):
+                 salvage_tokens: int = 16_000, verify_temp: float = 1.0, select_temp: float = 0.2,
+                 top_k: int | None = None):
         self.client = LocalClient(base_url, model_path, temperature=temperature, top_p=top_p,
-                                  max_connections=concurrency + 8)
+                                  max_connections=concurrency + 8, top_k=top_k)
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens

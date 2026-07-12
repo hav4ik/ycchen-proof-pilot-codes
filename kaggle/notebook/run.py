@@ -56,7 +56,8 @@ async def run(args) -> None:
 
     agent = ProofAgent(args.base_url, args.model_path, temperature=args.temperature,
                        max_tokens=args.max_tokens, concurrency=args.concurrency,
-                       est_tps=args.est_tps, call_cap=args.call_cap)
+                       est_tps=args.est_tps, call_cap=args.call_cap, top_k=args.top_k,
+                       top_p=args.top_p)
     # wait for the server (it was launched by the notebook just before us)
     for _ in range(args.health_wait // 5):
         if await agent.health():
@@ -137,7 +138,23 @@ def main() -> None:
     ap.add_argument("--call-cap", type=int, default=32000, help="per-call token ceiling (above this model's natural proof length)")
     ap.add_argument("--temperature", type=float, default=1.0, help="prover/refiner temp; verify/select use low temp internally")
     ap.add_argument("--health-wait", type=int, default=1200, help="seconds to wait for server")
+    # FMI-required knobs (submissions-instructions §2a). Aliases onto the native knobs above so
+    # behavior is unchanged when unset.
+    ap.add_argument("--top-p", "--top_p", type=float, default=0.95, dest="top_p")
+    ap.add_argument("--max_new_tokens", type=int, default=None,
+                    help="FMI alias for --max-tokens/--call-cap: per-call generation ceiling")
+    ap.add_argument("--num_ctx", type=int, default=None,
+                    help="FMI knob: context bound; clamps the per-call ceiling here. The server "
+                         "context length itself is set at serve time (serve/serve_final.sh CTX)")
+    ap.add_argument("--top_k", type=int, default=None,
+                    help="FMI knob: top-k sampling (unset = server default, i.e. disabled)")
     args = ap.parse_args()
+    if args.max_new_tokens is not None:
+        args.max_tokens = args.max_new_tokens
+        args.call_cap = min(args.call_cap, args.max_new_tokens)
+    if args.num_ctx is not None:
+        args.max_tokens = min(args.max_tokens, args.num_ctx)
+        args.call_cap = min(args.call_cap, args.num_ctx)
     asyncio.run(run(args))
 
 

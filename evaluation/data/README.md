@@ -6,6 +6,10 @@ Source: Google DeepMind *IMO-Bench* (paper *Towards Robust Mathematical Reasonin
 |---|---|---|
 | `proofbench_v2.csv` | **IMO-ProofBench**, 60 proof problems (Basic 30 + Advanced 30). **Use v2** (v1 is deprecated; it fixed the PB-Advanced-022 typo). | `aa8b813dbd4068137e3d165e5da228f6e0e1cc85a91c37883e1791b954e43af0` |
 | `gradingbench.csv` | **IMO-GradingBench**, autograder calibration reference (problem × candidate solution × human score). Used to validate the correlation between the ProofAutoGrader and human scores; not the main eval set. | `e85a520c2bbb5a89f2db35088c7935d485922f26cf2bbd04f15e1d967af26cfe` |
+| `deepseek-math-v2.txt` | 8,192-token-window math worked-solutions text used as the **attention-sink calibration corpus** by `olmo3_sink/build_init_model.py` (Final Pipeline step 2); its sha256 is recorded in each sink checkpoint's `sink_provenance.json`. | `d3f478ac5917266ae92b061ea0b56480baa8a0753a8b05125873e121b35864c8` |
+| `imo-bench.txt` | Plain-text dump of IMO-Bench problems/solutions (auxiliary reference; not the eval set). | `a46c57bb1c5cfecd473a3cc3f0e1e8840bf2e1ae5051e1e054728866350ef14b` |
+| `subset_dev.csv` | Small dev subset of ProofBench used for harness smoke tests. | `8d55ae6f4214d837f5780b9ba09852ac3a7ca8388161044d64fb43a5ab24904f` |
+| `imo_proofbench_single_round_prompt_templates.json` | Single-round grading prompt templates for the ProofAutoGrader. | `07ec8aa41d40e3fdaaa721930954513e6fdbe2b026bb12d193953bbdaef8844c` |
 
 Downloaded from: `https://raw.githubusercontent.com/google-deepmind/superhuman/main/imobench/` (fetched 2026-06-01).
 

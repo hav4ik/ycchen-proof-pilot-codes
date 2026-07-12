@@ -25,10 +25,12 @@ class ProofAgentV2:
     def __init__(self, base_url: str, model_path: str, *, temperature: float = 0.6,
                  top_p: float = 0.95, call_cap: int = 100_000, max_concurrent: int = 12,
                  gen_cap: int = 6, finalize_reserve_s: float = 180.0,
-                 verify_temp: float = 0.6, select_temp: float = 0.6):
+                 verify_temp: float = 0.6, select_temp: float = 0.6,
+                 top_k: int | None = None):
         self.client = StreamClient(base_url, model_path, max_connections=max_concurrent + 8)
         self.temperature = temperature
         self.top_p = top_p
+        self.top_k = top_k
         self.call_cap = call_cap
         self.max_concurrent = max_concurrent
         self.gen_cap = gen_cap
@@ -52,7 +54,7 @@ class ProofAgentV2:
                                  finalize_reserve_s=self.finalize_reserve_s,
                                  role_temps=self.role_temps,
                                  seed_base=zlib.crc32(problem.encode()) % 1_000_000,
-                                 deadline=deadline)
+                                 deadline=deadline, top_k=self.top_k)
         gate = ConcurrencyGate(total=self.max_concurrent, gen_cap=self.gen_cap)
         t0 = time.monotonic()
         coro = _solve_pooled(problem, engine, gate, deadline=deadline,

@@ -23,11 +23,12 @@ from transformers import AutoTokenizer
 class LocalClient:
     def __init__(self, base_url: str, model_path: str, *, temperature: float = 0.6,
                  top_p: float = 0.95, request_timeout: float = 3600.0,
-                 max_connections: int = 64):
+                 max_connections: int = 64, top_k: int | None = None):
         self.base = base_url.rstrip("/")
         self.model = model_path  # sglang served_model_name == the model path
         self.temperature = temperature
         self.top_p = top_p
+        self.top_k = top_k
         limits = httpx.Limits(max_connections=max_connections,
                               max_keepalive_connections=max_connections)
         self._http = httpx.AsyncClient(timeout=httpx.Timeout(request_timeout), limits=limits)
@@ -49,6 +50,8 @@ class LocalClient:
             "temperature": self.temperature if temperature is None else temperature,
             "top_p": self.top_p if top_p is None else top_p,
         }
+        if self.top_k is not None:
+            payload["top_k"] = self.top_k   # sglang chat-completions extension
         if seed is not None:
             payload["seed"] = seed   # sglang honours OpenAI `seed` -> reproducible per-call sampling
         r = await self._http.post(f"{self.base}/v1/chat/completions", json=payload,
@@ -82,6 +85,8 @@ class LocalClient:
             "top_p": self.top_p if top_p is None else top_p,
             "max_new_tokens": max_new_tokens,
         }
+        if self.top_k is not None:
+            sp["top_k"] = self.top_k
         payload = {"input_ids": input_ids, "sampling_params": sp}
         r = await self._http.post(f"{self.base}/generate", json=payload, timeout=timeout)
         r.raise_for_status()
