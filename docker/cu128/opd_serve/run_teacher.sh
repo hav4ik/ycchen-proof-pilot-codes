@@ -16,6 +16,18 @@
 #
 #   CUDA_VISIBLE_DEVICES=3 ./run_teacher.sh --tp 1 --port 8100
 set -euo pipefail
+
+# --- CUDA-13 forward-compat (see Dockerfile cuda13compat stage) --------------------------------------
+# sglang 0.5.14 is a CUDA-13 build and can't be pinned to cu128 (sgl-project/sglang#25069). If this
+# node's driver predates CUDA 13, load the baked forward-compat libcuda so the serve stack runs on
+# CUDA-12.x datacenter drivers (>=525). On a CUDA-13 driver this is skipped (native libcuda is used).
+if [ -d /opt/cuda13-compat ]; then
+  _cc=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9]\{1,\}\).*/\1/p' | head -1)
+  if [ -n "${_cc}" ] && [ "${_cc}" -lt 13 ] 2>/dev/null; then
+    export LD_LIBRARY_PATH="/opt/cuda13-compat:${LD_LIBRARY_PATH:-}"
+    echo "[cuda13-compat] node driver CUDA ${_cc}.x < 13 -> forward-compat libcuda enabled" >&2
+  fi
+fi
 SERVE_PY="${SERVE_PY:-/opt/venv/serve/bin/python}"
 OPD_REPO="${OPD_REPO:-/opt/opd/repo}"
 MODEL="${MODEL:-${DEEPSEEK_V4_FLASH:-/models/DeepSeek-V4-Flash}}"

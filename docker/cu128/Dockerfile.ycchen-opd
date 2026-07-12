@@ -22,6 +22,16 @@
 #   DOCKER_BUILDKIT=1 docker build -f docker/cu128/Dockerfile.ycchen-opd -t ycchen-opd:cu128 .
 # =============================================================================
 ARG BASE=chankhavu/olmo3-olmocore:cu128-fa2-sink
+
+# CUDA-13 forward-compat source. sglang 0.5.14 is inherently a CUDA-13 build (it hard-pins
+# cuda-python>=13.0 + torch 2.11.0/cu130; sglang went CUDA-13-only at 0.5.11 and CANNOT be installed on
+# cu128 — see sgl-project/sglang#25069: torch cu128 needs cuda-bindings<13, sglang's cuda-python needs
+# ~=13.x → ResolutionImpossible). We keep 0.5.14 (our teacher/rollout sink patches are re-anchored to it)
+# and instead bake NVIDIA's OFFICIAL forward-compat libcuda from the matching Ubuntu-22.04 CUDA-13 base,
+# loaded CONDITIONALLY at runtime by run_{teacher,rollout}.sh ONLY when the node driver predates CUDA 13
+# (e.g. the Ai2 12.8 ceiling / older H200 hosts). On a CUDA-13 driver (B200 hosts) it is never used.
+FROM nvidia/cuda:13.0.1-base-ubuntu22.04 AS cuda13compat
+
 FROM ${BASE}
 
 LABEL org.opencontainers.image.title="ycchen-opd" \
@@ -118,6 +128,10 @@ RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
     uv venv --python python3.12 "${SERVE_VENV}"; \
     uv pip install --python "${SERVE_VENV}/bin/python" --prerelease=allow "${SGLANG_SPEC}"; \
     "${SERVE_VENV}/bin/python" -c "import sglang; print('sglang', sglang.__version__)"
+
+# CUDA-13 forward-compat libcuda for the (inherently CUDA-13) serve venv — see the cuda13compat stage
+# note at the top. Loaded conditionally by run_{teacher,rollout}.sh only on pre-CUDA-13 drivers.
+COPY --from=cuda13compat /usr/local/cuda/compat/ /opt/cuda13-compat/
 
 # Bake the whole serve harness (run_teacher.sh / run_rollout.sh / bake helper + the patched sglang sources).
 COPY docker/cu128/opd_serve /opt/opd/opd_serve
