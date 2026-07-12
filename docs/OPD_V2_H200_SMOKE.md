@@ -11,61 +11,59 @@ of `env_1node_smoke.sh`; it uses the in-repo `problems.parquet` and drops to 40k
 Layout (**4:2:2**): teacher DeepSeek-V4-Flash TP4 → GPU 0-3 · rollout student TP2 → 4-5 · trainer
 FSDP2+CPU-offload world 2 → 6-7 · orchestrator on CPU.
 
-Every command below is copy-paste, top to bottom. Run them **on the H200 node** unless marked *(dev box)*.
+Every command below is copy-paste, top to bottom, **on the fresh H200 node**. The whole sequence:
+
+> **preflight → pull image → download models → Shot 1 (plumbing) → watch → Shot 2 (real path)**
+
+The first run is the first time any of this executes on a GPU, so we do it in two shots (§Step 3): a
+cheap `single_round` plumbing check, then the real `agentic`+dsflash path.
 
 ---
 
-## Step 0 — pick your paths
+## Step 0 — preflight (2 min): can the node actually run this?
 
 ```bash
-export MODELS=/data/models          # where model weights live
-export RUNS=/data/runs              # scratch for run outputs (hidden spool, weights, config, ckpts)
-mkdir -p "$MODELS" "$RUNS"
-export DEEPSEEK_REPO=deepseek-ai/DeepSeek-V4-Flash   # verified public on HF (no token needed)
+nvidia-smi --query-gpu=index,name,memory.total --format=csv        # expect 8× H200, ~140 GB each
+docker run --rm --gpus all chankhavu/ycchen-opd:cu128 nvidia-smi -L # docker sees all 8 GPUs
+free -g | awk '/Mem/{print "host RAM:",$2,"GB — need ~400+ (32B + CPU-offloaded optimizer)"}'
+df -h /data 2>/dev/null || df -h /                                  # need ~1 TB (DeepSeek + student + scratch)
+```
+If GPUs aren't visible in docker, host RAM < ~400 GB, or disk < ~1 TB → **stop**; those are hardware
+gaps, no config fixes them. (The `docker run … nvidia-smi` also doubles as your image-pull test.)
+
+## Step 1 — get the image
+
+```bash
+docker pull chankhavu/ycchen-opd:cu128          # digest sha256:94fa5bd5…
+# air-gapped node instead? on the dev box:  docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
 ```
 
-Disk: the student is ~65 GB; **DeepSeek-V4-Flash is large (hundreds of GB)** — make sure `$MODELS` has room.
+## Step 2 — paths + download the 3 model dirs
 
-**Datasets:** no training corpus to download (OPD is on-policy — the student generates its own rollouts,
-scored live). The **prompt dataset** is `ycchen/dsflash-proof-distill-v2-test` (public HF), seeded into
-the agentic pool at runtime by `opd_v2.agentic.seed` → **the node needs network** (or pre-seed once:
-`python -m opd_v2.agentic.seed --run-dir $RUN_DIR`). *(The `single_round` fallback instead uses the
-in-repo `distill_gen/problems/problems.parquet`, 9,834 problems — no seed, no network.)*
-
-## Step 1 — download the models
-
-The image already has `hf` (huggingface_hub 1.23), so run these inside a throwaway container that mounts
-`$MODELS` (no local Python setup needed). Or run `hf download …` directly if you have the HF CLI on the host.
+The image already ships `hf` (huggingface_hub 1.23) — download inside a throwaway container, no host
+Python needed. Both repos are **public** (no token).
 
 ```bash
-# 1a. student (deploy-format; PUBLIC; works for BOTH trainer and rollout)
+export MODELS=/data/models RUNS=/data/runs      # weights + run scratch (hidden spool, weights, ckpts)
+mkdir -p "$MODELS" "$RUNS"
+
+# student (deploy-format; works for BOTH trainer and rollout)
 docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
   hf download chankhavu/yccchen-olmo3-deploy --local-dir /models/student-deploy
 
-# 1b. DeepSeek-V4-Flash teacher  (set HF_TOKEN if the repo is gated)
-docker run --rm -e HF_TOKEN -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
-  hf download "$DEEPSEEK_REPO" --local-dir /models/DeepSeek-V4-Flash
-```
+# DeepSeek-V4-Flash teacher (large — hundreds of GB; this is the long pole)
+docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
+  hf download deepseek-ai/DeepSeek-V4-Flash --local-dir /models/DeepSeek-V4-Flash
 
-Sanity-check both have a `config.json` + weight shards:
-```bash
+# sanity: both must have config.json + shards
 ls "$MODELS/student-deploy"/config.json "$MODELS/student-deploy"/*.safetensors | head
-ls "$MODELS/DeepSeek-V4-Flash"/config.json | head
+ls "$MODELS/DeepSeek-V4-Flash"/config.json
 ```
 
-## Step 2 — get the image onto the node
-
-Built on the dev box; ship it to the H200 node one of two ways:
-
-```bash
-# (dev box) push to a registry you own:
-docker tag ycchen-opd:cu128 chankhavu/ycchen-opd:cu128 && docker push chankhavu/ycchen-opd:cu128
-# (H200 node) pull:
-docker pull chankhavu/ycchen-opd:cu128
-
-# --- or transfer directly, no registry: ---
-# (dev box)   docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
-```
+**Datasets:** nothing else to download (OPD is on-policy — the student generates its own rollouts, scored
+live). The prompt dataset `ycchen/dsflash-proof-distill-v2-test` (public) is seeded into the agentic pool
+at runtime by `opd_v2.agentic.seed` → **Shot 2 needs network** on the node (or pre-seed once, see Step 3).
+The `single_round` plumbing check (Shot 1) uses the in-repo `problems.parquet` — no seed, no network.
 
 ## Step 3 — run the shakeout (recommended: two shots)
 
@@ -135,6 +133,12 @@ tail -f "$RUNS/opd_1node_smoke/orchestrator.log"    # per-step metrics
   low, `rollout/length_rate` ≈ 0; on g4 steps `g4/top1` ↑ + `learn/reverse_kl` ↓. Metric reference:
   [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md).
 - **Done:** orchestrator exits rc=0 after `MAX_STEPS`; a checkpoint under `$RUNS/opd_1node_smoke/checkpoints/`.
+- **If it fails:** the launcher aborts and names the offending log. Collect the tail of the failing
+  server (`{teacher,rollout,trainer}.log`) **and** `orchestrator.log` from `$RUN_DIR` — that pair is
+  enough to diagnose almost anything; cross-check the symptom against Troubleshooting below first.
+
+> **Two-shot recap:** Shot 1 writes to `$RUNS/opd_smoke_plumbing/`, Shot 2 to `$RUNS/opd_1node_smoke/` —
+> point the `tail -f` commands at whichever shot is running.
 
 ---
 
