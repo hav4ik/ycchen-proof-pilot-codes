@@ -67,7 +67,35 @@ docker pull chankhavu/ycchen-opd:cu128
 # (dev box)   docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
 ```
 
-## Step 3 — run the shakeout
+## Step 3 — run the shakeout (recommended: two shots)
+
+This is the first time any of this runs on a GPU. De-risk in two shots: a **fast plumbing check** with
+the lighter `single_round` producer (no seed, no network, 40k) to prove the four-process loop turns —
+FA2 sink + teacher hidden-extract + weight-sync all fire on real H200s — **then** the real **agentic +
+dsflash** path (the baked default, 57k). Shot 1 catches gross breakage cheaply; only escalate to shot 2
+once it's green.
+
+### Shot 1 — plumbing check (`single_round`, ~40k, no dataset)
+
+```bash
+docker run --rm -it --gpus all --ipc=host --shm-size=64g \
+  -v "$MODELS":/models -v "$RUNS":/runs \
+  -e STUDENT_PATH=/models/student-deploy \
+  -e DEEPSEEK_V4_FLASH=/models/DeepSeek-V4-Flash \
+  -e RUN_DIR=/runs/opd_smoke_plumbing \
+  -e MOE_BACKEND=marlin \
+  -e PRODUCER=single_round \
+  -e CONTEXT_LEN=40960 -e MAX_TRAJ_TOKENS=40960 -e MICRO=40960 -e MAX_NEW_TOKENS=36864 \
+  -e TRAIN_BATCH_TRAJS=4 -e ROLLOUT_N=2 -e TARGET_INFLIGHT=8 -e ROLLOUT_MAXRUN=4 \
+  -e MAX_STEPS=10 \
+  chankhavu/ycchen-opd:cu128 \
+  bash -lc 'source /opt/opd/launch/env_1node_smoke.sh && bash /opt/opd/launch/run_1node.sh'
+```
+
+Prompts come from the in-repo `problems.parquet` — **no seed, no network**. Green = `train/loss` ↓ and
+`onpolicy/weight_version` ↑ over ~10 steps. If this OOMs, fix it here (cheaper) before shot 2.
+
+### Shot 2 — the real path (`agentic` + dsflash, ~57k) — the baked default
 
 ```bash
 docker run --rm -it --gpus all --ipc=host --shm-size=64g \
@@ -85,11 +113,11 @@ docker run --rm -it --gpus all --ipc=host --shm-size=64g \
   bash -lc 'source /opt/opd/launch/env_1node_smoke.sh && bash /opt/opd/launch/run_1node.sh'
 ```
 
-The `-e` overrides are optional — they are the `env_1node_smoke.sh` defaults, shown explicitly so the
-config is visible in one place. Drop them for the baked defaults. **The node needs network** for the
-agentic seed (or pre-seed with `python -m opd_v2.agentic.seed --run-dir /runs/opd_1node_smoke`). For a
-lighter no-dataset check, add `-e PRODUCER=single_round -e CONTEXT_LEN=40960 -e MAX_TRAJ_TOKENS=40960
--e MICRO=40960 -e MAX_NEW_TOKENS=36864`. For live metrics add `-e WANDB_MODE=online -e WANDB_API_KEY=…`.
+Every `-e` here is already the `env_1node_smoke.sh` **baked default** (shown for visibility) — drop them
+and just `source env_1node_smoke.sh && bash run_1node.sh`. **The node needs network** for the agentic
+seed, or pre-seed once: `python -m opd_v2.agentic.seed --run-dir /runs/opd_1node_smoke`. If the world-2
+trainer OOMs at 57k, see Troubleshooting (`MICRO`↓, `TRAINER_NPROC=3`). For live metrics add
+`-e WANDB_MODE=online -e WANDB_API_KEY=…`.
 
 ## Step 4 — watch it (from another shell on the node)
 
