@@ -22,9 +22,11 @@ export TARGET_INFLIGHT=512 STARVE_TIMEOUT=7200 DROP_FINISH_REASONS=length
 
 # ---- teacher: score window > max_traj so it never length-fails ----
 export TEACHER_CONTEXT_LEN=150000 TEACHER_MEMFRAC=0.6 TEACHER_MAXRUN=16
-# ⚠️ B200: DeepSeek MoE backend. marlin is Ampere/Hopper int4; on sm_100 pick a Blackwell backend
-#    (cutlass/triton/flashinfer) and benchmark. Set it here (run_teacher.sh reads MOE_BACKEND).
-# export MOE_BACKEND=<blackwell-backend>
+# B200 MoE backend: run_teacher.sh defaults MOE_BACKEND=auto -> sglang picks per hardware (marlin on
+# Hopper = her V33; a Blackwell backend on sm_100). DeepSeek-V4-Flash TP4 is confirmed to run on a
+# GB200 node (sglang #23743). Overrides IF auto/first run misbehaves on B200:
+#   export MOE_BACKEND=flashinfer_mxfp4     # the backend validated for DSv4-Flash on GB200 (#23743)
+#   export MAX_PREFILL_TOKENS=8192          # only if the FlashMLA mixed decode+prefill crash appears
 
 # ---- trainer: 32B @140k -> CPU offload, HSDP ----
 export MICRO=131072 CHUNK_SIZE=2048 CPU_OFFLOAD=1 TRAIN_BATCH_TRAJS=64

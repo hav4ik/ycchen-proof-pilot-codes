@@ -8,6 +8,7 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 ## Documents
 | doc | what it covers |
 |---|---|
+| [OPD_V2_ROADMAP.md](OPD_V2_ROADMAP.md) | **start here** — the two run paths (8×H200 smoke, 64×B200), readiness, open items, sequence |
 | [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) | **runbook**: single-node 8×H200 end-to-end shakeout (40k, 4:2:2, DeepSeek teacher) — the final integration test before 64× B200, paste-ready |
 | [OPD_V2_4GPU_OLMO3.md](OPD_V2_4GPU_OLMO3.md) | **runbook**: single-node 4×H200 test (1:1:2) — Olmo3-32B ← Olmo3-32B (two checkpoints = real distill, or self-distill = codec correctness check) |
 | [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) | how her algorithm works — 4-process arch, the agentic self-play environment, the rollout `produce_sample` atom, JSD distillation, weight-sync & staleness |
