@@ -18,13 +18,16 @@ Every command below is copy-paste, top to bottom. Run them **on the H200 node** 
 export MODELS=/data/models          # where model weights live
 export RUNS=/data/runs              # scratch for run outputs (hidden spool, weights, config, ckpts)
 mkdir -p "$MODELS" "$RUNS"
-# the DeepSeek teacher repo you served in production — CONFIRM this repo id (likely deepseek-ai/DeepSeek-V4-Flash):
-export DEEPSEEK_REPO=deepseek-ai/DeepSeek-V4-Flash
-# if the teacher repo is gated, accept its license on HF and set a token:
-# export HF_TOKEN=hf_xxx
+export DEEPSEEK_REPO=deepseek-ai/DeepSeek-V4-Flash   # verified public on HF (no token needed)
 ```
 
 Disk: the student is ~65 GB; **DeepSeek-V4-Flash is large (hundreds of GB)** — make sure `$MODELS` has room.
+
+**Datasets:** nothing to download. OPD is on-policy — the student generates its own rollouts and the
+teacher scores them live, so there's no training corpus. The smoke's prompts come from the in-repo
+`distill_gen/problems/problems.parquet` (9,834 math problems, ships in the image). *(Only the agentic
+producer uses a dataset — the pool seed `ycchen/dsflash-proof-distill-v2-test`, public, built at runtime;
+the single_round smoke does not.)*
 
 ## Step 1 — download the models
 

@@ -20,6 +20,24 @@ world 2 → GPU 2-3 · orchestrator CPU.
 - ⚠️ `silence09/DeepSeek-V4-Pro-Tiny` **cannot** be used: its hidden=500 fails the codec's hard
   `d % 32 == 0` assert (`_common/hidden_codec.py:52`).
 
+## Download the model(s)
+
+No DeepSeek here — teacher and student are Olmo3-32B. Download the student (public), and a **second**
+checkpoint only if you want real distillation (else it self-distills):
+
+```bash
+export MODELS=/data/models; mkdir -p "$MODELS"
+# student (checkpoint B) — public, no token
+docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
+  hf download chankhavu/yccchen-olmo3-deploy --local-dir /models/olmo3-32b-ckptB
+# teacher (checkpoint A) — OPTIONAL; a different Olmo3-32B ckpt for a real (non-zero) JSD signal
+# docker run --rm -v "$MODELS":/models chankhavu/ycchen-opd:cu128 \
+#   hf download <your/olmo3-32b-ckptA> --local-dir /models/olmo3-32b-ckptA
+```
+
+**Datasets:** none to download — OPD self-generates its rollouts; the single_round prompts are the
+in-repo `distill_gen/problems/problems.parquet` (9,834 problems, ships in the image).
+
 ## Run
 
 ```bash
