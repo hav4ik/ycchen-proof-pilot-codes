@@ -49,4 +49,19 @@ def register_olmo3_sink(exist_ok: bool = True) -> None:
         )
     else:
         register_fa3_sink_attention()
+    # FA2 sink (B200/no-FA3): post-correction re-normalization on stock FA2 (all-arch). Registered
+    # alongside FA3; requesting attn_implementation="olmo3_sink_fa2" needs the `flash_attn` (FA2) pkg.
+    # NB: transformers' own `flash_attention_2` SILENTLY DROPS the sink (stock FA2 has no sink arg;
+    # only FA3 `s_aux` / FA4 `learnable_sink` are honored) -> use this backend on Blackwell.
+    try:
+        from .olmo3_sink_fa2 import register_olmo3_sink_fa2
+    except ModuleNotFoundError as e:
+        if e.name != "flash_attn":
+            raise
+        warnings.warn(
+            "olmo3_sink: flash_attn (FA2) not available -- 'olmo3_sink_fa2' backend NOT registered.",
+            stacklevel=2,
+        )
+    else:
+        register_olmo3_sink_fa2()
     _REGISTERED = True

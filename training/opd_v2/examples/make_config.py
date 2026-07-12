@@ -53,6 +53,9 @@ def main():
     # student model (for switching to a long-context softdistill model; the deploy variant provides a rope-safe config for the weight-sync checkpoint)
     cfg.trainer.student_path = _env("STUDENT_PATH", cfg.trainer.student_path)
     cfg.trainer.deploy_config_src = _env("STUDENT_DEPLOY_PATH", cfg.trainer.deploy_config_src)
+    # attention impl: default olmo3_sink_fa3 (patched Hopper FA3). On B200/sm_100 (no FA3) set
+    # ATTN_IMPL=flash_attention_2 -> transformers runs the sink via s_aux post-correction.
+    cfg.trainer.attn = _env("ATTN_IMPL", cfg.trainer.attn)
     cfg.trainer.lr = _envf("LR", cfg.trainer.lr)
     cfg.trainer.micro_batch_tokens = _envi("MICRO", cfg.trainer.micro_batch_tokens)
     cfg.trainer.train_batch_trajs = _envi("TRAIN_BATCH_TRAJS", cfg.trainer.train_batch_trajs)
