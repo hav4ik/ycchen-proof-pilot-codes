@@ -8,11 +8,18 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 ## Documents
 | doc | what it covers |
 |---|---|
+| [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) | how her algorithm works — 4-process arch, the agentic self-play environment, the rollout `produce_sample` atom, JSD distillation, weight-sync & staleness |
+| [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md) | every config knob + env override + her best OPD-32B run (V33) values |
 | [OPD_V2_PARITY_STATUS.md](OPD_V2_PARITY_STATUS.md) | the cu13 ↔ cu128/sglang-0.5.14 parity matrix, adversarial findings, and what's baked/verified |
 | [OPD_V2_TRAIN_DOCKER_PLAN.md](OPD_V2_TRAIN_DOCKER_PLAN.md) | the original design/plan for the cu128 image |
 | [../docker/cu128/README.md](../docker/cu128/README.md) | how to build/run the cu128 image |
 
 ## Change log (newest first)
+
+### Documented her algorithm + config
+Added [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) (environment + rollout + training loop, read from her
+code) and [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md) (all knobs + her best OPD-32B V33
+run values). These are faithful reference docs — behavior descriptions, no changes.
 
 ### Adversarial faithfulness audit (5 sub-agents) — 1 violation found & fixed
 Audited the entire branch diff vs her code; the only allowed changes are (1) cu128 packaging
