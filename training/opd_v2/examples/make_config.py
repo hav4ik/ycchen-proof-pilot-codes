@@ -54,7 +54,8 @@ def main():
     cfg.trainer.student_path = _env("STUDENT_PATH", cfg.trainer.student_path)
     cfg.trainer.deploy_config_src = _env("STUDENT_DEPLOY_PATH", cfg.trainer.deploy_config_src)
     # attention impl: default olmo3_sink_fa3 (patched Hopper FA3). On B200/sm_100 (no FA3) set
-    # ATTN_IMPL=flash_attention_2 -> transformers runs the sink via s_aux post-correction.
+    # ATTN_IMPL=olmo3_sink_fa2 -> our post-correction sink on stock FA2. Do NOT use stock
+    # flash_attention_2: transformers silently DROPS the sink there (only FA3 s_aux / FA4 honor it).
     cfg.trainer.attn = _env("ATTN_IMPL", cfg.trainer.attn)
     cfg.trainer.lr = _envf("LR", cfg.trainer.lr)
     cfg.trainer.micro_batch_tokens = _envi("MICRO", cfg.trainer.micro_batch_tokens)

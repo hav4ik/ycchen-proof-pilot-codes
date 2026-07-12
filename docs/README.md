@@ -14,6 +14,25 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 
 ## Change log (newest first)
 
+### Adversarial faithfulness audit (5 sub-agents) — 1 violation found & fixed
+Audited the entire branch diff vs her code; the only allowed changes are (1) cu128 packaging
+and (2) the FA2 attention-sink port. Results:
+- **`register.py` / `make_config.py`** — FAITHFUL (additive/opt-in; `ATTN_IMPL` defaults to her
+  `olmo3_sink_fa3`). Fixed a misleading comment that suggested stock `flash_attention_2` (which
+  silently drops the sink) — corrected to `olmo3_sink_fa2`.
+- **`olmo3_sink_fa2.py`** — FAITHFUL PORT (forward `o_sink`, sink-inclusive `lse'`, exact
+  dq/dk/dv via FA2 native backward, identical closed-form `dsink`, varlen isolation, sliding
+  window). Added a flash-attn `>=2.7` version guard (the private varlen fwd/bwd are called
+  positionally with split `window_size_left/right`).
+- **`_patch_sglang_514.py`** — FAITHFUL RE-ANCHOR (all teacher patches map 1:1 to her
+  `_patch_sglang.py`; emit-rank, fp8 `wo_a` bf16 dequant, /score, spool all identical; the
+  5th patch restores her 0.5.12 no-truncation in spool mode).
+- **serve `sglang_patches/*`** — byte-identical to her patched sglang in `pp-env`.
+- **`run_teacher.sh` / `run_rollout.sh` / Dockerfile** — FAITHFUL except **one violation, now
+  fixed**: `run_rollout.sh` defaulted `SKIP_TOKENIZER_INIT=1` (dropped her parsers/tokenizer);
+  restored to her default `0`. (Output-neutral for the token-in/out `/generate` path, but an
+  undocumented flag divergence.)
+
 ### Faithfulness guard — restored her weight-sync behavior
 The working tree carried local edits to `orchestrator.py` / `data_plane/clients.py` /
 `trainer/core.py` that **changed** her design (abort-pause + `flush_cache=True` +

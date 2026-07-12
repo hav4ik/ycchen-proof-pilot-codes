@@ -29,9 +29,21 @@ from transformers.modeling_flash_attention_utils import (
     prepare_fa_kwargs_from_position_ids,
 )
 
+import flash_attn as _flash_attn
 from flash_attn.flash_attn_interface import (  # stock FA2, unmodified
     _flash_attn_varlen_backward,
     _flash_attn_varlen_forward,
+)
+
+# We call flash-attn's private varlen fwd/bwd POSITIONALLY, passing window_size as two separate ints
+# (window_size_left, window_size_right) — the layout since flash-attn 2.7. On <=2.6 window_size was a
+# single tuple, so our (wl, wr) would silently misalign onto (softcap, alibi) -> wrong attention.
+# The private fn is wrapped (its signature reads as (*args, **kwargs)), so guard by VERSION, not by
+# introspecting param names. Fails loud on an incompatible wheel instead of computing wrong results.
+_FA_VER = tuple(int(x) for x in _flash_attn.__version__.split(".")[:2])
+assert _FA_VER >= (2, 7), (
+    f"olmo3_sink_fa2 needs flash-attn>=2.7 (split window_size_left/right args); "
+    f"got {_flash_attn.__version__} — pin a compatible wheel."
 )
 
 ATTN_NAME = "olmo3_sink_fa2"

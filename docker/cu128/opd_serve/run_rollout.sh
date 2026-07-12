@@ -54,7 +54,9 @@ EXTRA_ARGS=()
   EXTRA_ARGS+=(--triton-attention-num-kv-splits "$KV_SPLITS")
 
 PARSER_ARGS=(--reasoning-parser deepseek-r1 --tool-call-parser deepseekv4)
-[ "${SKIP_TOKENIZER_INIT:-1}" = "1" ] && PARSER_ARGS=(--skip-tokenizer-init)      # OPD rollout = token-in/out
+# Default matches Yi-Chia's run_rollout_fp8.sh (SKIP_TOKENIZER_INIT=0 -> tokenizer + parsers on); her
+# production run_mn.sh/sbatch rely on this default. Opt into token-only with SKIP_TOKENIZER_INIT=1.
+[ "${SKIP_TOKENIZER_INIT:-0}" = "1" ] && PARSER_ARGS=(--skip-tokenizer-init)
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 exec "$SERVE_PY" -m sglang.launch_server \
