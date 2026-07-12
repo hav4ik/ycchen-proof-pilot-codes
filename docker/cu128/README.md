@@ -16,7 +16,7 @@ The Ai2/Beaker cluster ceiling is **CUDA 12.8**, which is also the floor for Bla
 
 Numerics are validated fp64-exact vs eager and bit-exact on the OPD JSD loss. The rollout
 sglang uses Yi-Chia's patched sources, re-anchored to the **0.5.14** release (her cu13
-binaries won't run on cu128). Full parity matrix: [`OPD_V2_PARITY_STATUS.md`](OPD_V2_PARITY_STATUS.md).
+binaries won't run on cu128). Full parity matrix: [`../../docs/OPD_V2_PARITY_STATUS.md`](../../docs/OPD_V2_PARITY_STATUS.md).
 
 ## Build
 
@@ -41,8 +41,8 @@ hidden-extract patches).
 | `opd_serve/sglang_patches/` | Yi-Chia's patched sglang sources (olmo2 sink model, flash_rl loader, load_config, server_args) |
 | `opd_v2_train_smoke.py` | fp64-exactness + OPD JSD + FA2-parity + compile smoke (GPU) |
 | `test_attention_sink.py` | central sink-test launcher (`--group all`) |
-| `OPD_V2_PARITY_STATUS.md` | cu13 ↔ 0.5.14 parity/差異 matrix + adversarial findings |
-| `OPD_V2_TRAIN_DOCKER_PLAN.md` | design/plan doc |
+
+Pipeline-change docs live in [`../../docs/`](../../docs/) (parity matrix, plan, change log).
 
 The two anchored source patchers live in the repo (not here) and run at build time:
 `training/opd_v2/flash_rl/patches/apply_swa_patch.py` (rollout SWA KV-pool) and

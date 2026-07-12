@@ -1,0 +1,47 @@
+# docs/ — OPD pipeline updates (branch `opd/b200-cu128`)
+
+This folder tracks the changes we make to Yi-Chia Chen's OPD v2 pipeline on this branch.
+The goal of the branch: run the **full OPD v2 loop on CUDA 12.8 / B200 (sm_100)**, staying
+faithful to her cu13 behavior. Her training *code* is unchanged; our work is the cu128
+port of the attention-sink kernels, the sglang serve patches, and the container.
+
+## Documents
+| doc | what it covers |
+|---|---|
+| [OPD_V2_PARITY_STATUS.md](OPD_V2_PARITY_STATUS.md) | the cu13 ↔ cu128/sglang-0.5.14 parity matrix, adversarial findings, and what's baked/verified |
+| [OPD_V2_TRAIN_DOCKER_PLAN.md](OPD_V2_TRAIN_DOCKER_PLAN.md) | the original design/plan for the cu128 image |
+| [../docker/cu128/README.md](../docker/cu128/README.md) | how to build/run the cu128 image |
+
+## Change log (newest first)
+
+### cu128/B200 port
+- **Container** `docker/cu128/Dockerfile.ycchen-opd` — full loop, two isolated venvs
+  (base trainer/orchestrator; `/opt/venv/serve` rollout + teacher sglang 0.5.14). Builds
+  from the repo root; self-verifies both venvs at build time.
+- **Trainer sink** `olmo3_sink/olmo3_sink_fa2.py` (new) — B200 has no FA3, and stock
+  transformers `flash_attention_2` silently drops the sink, so the sink runs as a
+  `torch.compile`-safe **post-correction on stock FA2** (`o·exp(lse−logaddexp(lse,sink))`,
+  in-place, zero extra memory). Validated **fp64-exact** vs eager and **bit-exact** on the
+  OPD JSD loss; cross-checked identical to Prime-RL and OLMo-core.
+  Registered in `olmo3_sink/register.py`; selectable via `ATTN_IMPL` in
+  `training/opd_v2/examples/make_config.py`.
+- **Rollout attention** — `--attention-backend triton` (not the H200 FA3 default). Verified
+  triton threads the sink through **both** `forward_extend` (prefill) and `forward_decode`
+  (decode) on 0.5.14, so every decoded token gets the sink (flashinfer drops it).
+- **Rollout SWA KV-pool** — the build runs her idempotent
+  `training/opd_v2/flash_rl/patches/apply_swa_patch.py` against stock 0.5.14 `model_config.py`
+  so `is_hybrid_swa_model(Olmo3Sink)=True`; without it `--swa-full-tokens-ratio` is silently
+  inert and the 140k rollout OOMs.
+- **Teacher hidden-extract** `training/teacher_extract/_patch_sglang_514.py` (new) — Yi-Chia's
+  DeepSeek-V4-Flash `/score` hidden-extraction patches **re-anchored to sglang 0.5.14** (5
+  patches; 0.5.14 split her single 0.5.12 output-processor into
+  `batch_result_processor.py` + `output_streamer.py`). Fixes two adversarially-found bugs:
+  per-rank spool writes via `get_attention_tp_rank()`, and a per-chunk truncation skip in
+  spool mode. `wo_a` forced to dequant-to-bf16 (`SGLANG_OPT_FP8_WO_A_GEMM=0`) to avoid
+  fp8 policy bias in the teacher hidden state.
+
+## Still open
+- Multi-node/Beaker launcher — mechanical adaptation of `training/opd_v2/examples/run_mn.sh`
+  (swap `apptainer exec $SIF` → the container's two venvs; slurm → Beaker).
+- B200 hardware pass — DeepSeek-V4-Flash MoE backend (`marlin` → sm_100
+  cutlass/triton/flashinfer) and an actual sm_100 kernel run.
