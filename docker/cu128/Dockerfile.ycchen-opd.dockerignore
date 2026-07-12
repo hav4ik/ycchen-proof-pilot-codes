@@ -1,0 +1,14 @@
+# Build context = repo root (docker build -f docker/cu128/Dockerfile.ycchen-opd .).
+# The whole repo is COPYed into the image, so keep it — only drop VCS metadata, caches,
+# local venvs, and run/output artifacts that must never leak into the image.
+.git
+**/.git
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+**/venv
+**/runs
+**/wandb
+**/outputs
+**/*.log

@@ -1,0 +1,168 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+#  OPD v2 (Yi-Chia Chen) — CUDA 12.8 / cu128 training + serve image for B200 (sm_100)
+# =============================================================================
+# Packages the FULL OPD v2 loop (FSDP2 trainer + orchestrator + rollout sglang +
+# DeepSeek-V4-Flash teacher) into ONE cu128 image. Student = chankhavu/yccchen-olmo3-deploy.
+#
+# WHY cu128 (not Yi-Chia's cu13): the Ai2/Beaker cluster ceiling is CUDA 12.8, and 12.8
+# is also the floor for Blackwell sm_100. B200 has NO FA3 (Hopper-only), so:
+#   * trainer sink  -> `olmo3_sink_fa2` (post-correction on STOCK flash-attn-2), NOT patched-FA3.
+#   * rollout sink  -> sglang `--attention-backend triton` (honors the sink in prefill AND decode;
+#                      flashinfer drops it), NOT the H200 FA3 default.
+# See docker/cu128/OPD_V2_PARITY_STATUS.md for the full cu13<->0.5.14 parity matrix.
+#
+# TWO isolated venvs (train torch must not touch sglang's pinned torch/flashinfer/sgl_kernel):
+#   base `/app/.venv`  -> trainer + orchestrator  (torch 2.10+cu128, transformers 5.9.0, olmo3_sink_fa2, liger)
+#   `/opt/venv/serve`  -> rollout + teacher sglang (sglang 0.5.14 + Yi-Chia's patched/​re-anchored sources)
+#
+#   BASE = chankhavu/olmo3-olmocore:cu128-fa2-sink  (torch 2.10+cu128, flash_attn 2.8.x, olmo_core)
+#
+# BUILD (context = REPO ROOT):
+#   DOCKER_BUILDKIT=1 docker build -f docker/cu128/Dockerfile.ycchen-opd -t ycchen-opd:cu128 .
+# =============================================================================
+ARG BASE=chankhavu/olmo3-olmocore:cu128-fa2-sink
+FROM ${BASE}
+
+LABEL org.opencontainers.image.title="ycchen-opd" \
+      org.opencontainers.image.description="Yi-Chia Chen OPD v2 (trainer+orchestrator+rollout+teacher) on CUDA 12.8 for B200/sm_100" \
+      com.nvidia.cuda.version="12.8" \
+      ai.opd.target-arch="sm_100 (B200); also sm_80/86/90" \
+      ai.opd.trainer-sink="olmo3_sink_fa2 (post-correction on stock FA2; no FA3)" \
+      ai.opd.rollout-attn-backend="triton (sink-correct prefill+decode)"
+
+# The base auto-runs an olmocore training bootstrap as its ENTRYPOINT — neutralize it for this image.
+ENTRYPOINT []
+SHELL ["/bin/bash", "-lc"]
+
+# opd_v2 runtime deps (trainer + orchestrator). torch/flash_attn already in base.
+# transformers is PINNED to Yi-Chia's 5.9.0: the base ships 5.13.0, which broke olmo3_sink's rope
+# (transformers changed the Olmo3 rope_parameters API between 5.9 and 5.13 — verified in-container).
+RUN pip install --no-cache-dir \
+        "transformers==5.9.0" \
+        "liger-kernel==0.8.0" \
+        aiohttp wandb pyarrow polars datasets safetensors einops sentencepiece \
+        pydantic loguru psutil scipy tqdm huggingface-hub accelerate
+
+# flash-attn: STOCK prebuilt, ALL-ARCH. olmo3_sink_fa2 adds the sink OUTSIDE the kernel (Yi-Chia's
+# (out,lse) re-normalization), so we NEVER patch/build the kernel — a stock wheel that includes the
+# target arch (sm_100 for B200; sm_80/86/90 to also test on Ampere/Hopper) is all that's needed.
+# Set FLASH_ATTN_WHEEL to an explicit all-arch wheel URL for a base-independent pin. Build asserts the
+# kernel is unmodified; the smoke's real FA2 call is the per-arch runtime guard (fails "no kernel image").
+ARG FLASH_ATTN_WHEEL=""
+RUN set -eux; \
+    if [ -n "${FLASH_ATTN_WHEEL}" ]; then pip install --no-cache-dir --force-reinstall --no-deps "${FLASH_ATTN_WHEEL}"; fi; \
+    python - <<'PY'
+import flash_attn, inspect
+from flash_attn import flash_attn_varlen_func
+params = inspect.signature(flash_attn_varlen_func).parameters
+assert not any(("sink" in p) or ("aux" in p) for p in params), "expected STOCK FA2 (no in-kernel sink)"
+print("flash-attn", flash_attn.__version__, "= stock/unmodified; olmo3_sink_fa2 applies the sink via post-correction")
+PY
+
+# Yi-Chia's repo (imports are sys.path-from-__file__, run in place) + the tests.
+# Build context is the repo root, so `COPY .` places the whole tree (incl this docker/ dir) at OPD_REPO.
+ENV OPD_REPO=/opt/opd/repo \
+    OPD_ATTN_IMPL=olmo3_sink_fa2 \
+    OLMO_CORE_DIR=/opt/opd/OLMo-core
+COPY . ${OPD_REPO}
+COPY docker/cu128/opd_v2_train_smoke.py docker/cu128/test_attention_sink.py /opt/opd/
+
+# import sanity at build time (no GPU): model registers, config loads (FA3 import is lazy/optional).
+RUN python - <<'PY'
+import sys, os
+R=os.environ["OPD_REPO"]
+for p in (R, f"{R}/olmo3_sink", f"{R}/training/opd_v2/src", f"{R}/training/stage1_v2/src",
+          f"{R}/training/_common", f"{R}/training/_vendor_opd"):
+    sys.path.insert(0, p)
+import transformers
+from opd_v2.config import OPDConfig
+from olmo3_sink import register_olmo3_sink
+register_olmo3_sink()
+print(f"build-sanity OK: transformers {transformers.__version__}, opd_v2.config + olmo3_sink registered")
+PY
+
+# ============================================================================
+# SERVE venv: sglang 0.5.14 (cu128) + Yi-Chia's patched sglang files (rollout student)
+# ----------------------------------------------------------------------------
+# Isolated venv (sglang pins its own torch/flashinfer/sgl_kernel, must not touch the train stack).
+# Her binaries are cu13 (won't run on cu128); instead we install stock cu128 sglang 0.5.14 — which has
+# sm_100 kernels + native RadixAttention/triton attention-sink — and overlay HER patched SOURCE files
+# (staged from pp-env; robust to the runner<->cuda_graph_runner rename, unlike the stale deploy/target
+# overlays). Serves chankhavu/yccchen-olmo3-deploy (Olmo3SinkForCausalLM) as the rollout via
+# --attention-backend triton. Teacher (DeepSeek-V4-Flash) hidden-extract patches follow below.
+ENV SERVE_VENV=/opt/venv/serve
+ARG SGLANG_SPEC="sglang[srt]==0.5.14"
+RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
+    uv venv --python python3.12 "${SERVE_VENV}"; \
+    uv pip install --python "${SERVE_VENV}/bin/python" --prerelease=allow "${SGLANG_SPEC}"; \
+    "${SERVE_VENV}/bin/python" -c "import sglang; print('sglang', sglang.__version__)"
+
+# Bake the whole serve harness (run_teacher.sh / run_rollout.sh / bake helper + the patched sglang sources).
+COPY docker/cu128/opd_serve /opt/opd/opd_serve
+# Rollout serve patches. Four file overlays (olmo2 sink model, flash_rl loader, load_config, server_args)
+# PLUS the hybrid-SWA KV-pool patch: run Yi-Chia's idempotent apply_swa_patch.py against the STOCK 0.5.14
+# model_config.py (it adds Olmo3SinkForCausalLM/Olmo2ForCausalLM to `hybrid_swa_archs` and extends
+# `get_hybrid_layer_ids` to read olmo `layer_types`). WITHOUT it, --swa-full-tokens-ratio is SILENTLY inert
+# for olmo3 -> KV is allocated full on all 32 layers -> the 140k long-context rollout OOMs. Anchors verified
+# present on 0.5.14; the patcher's asserts fail the build loudly if a future sglang layout moves them.
+RUN set -eux; \
+    chmod +x /opt/opd/opd_serve/*.sh; \
+    SGL="$(${SERVE_VENV}/bin/python -c 'import sglang,os;print(os.path.dirname(sglang.__file__))')"; \
+    cp /opt/opd/opd_serve/sglang_patches/models/olmo2.py            "$SGL/srt/models/olmo2.py"; \
+    cp /opt/opd/opd_serve/sglang_patches/model_loader/loader.py     "$SGL/srt/model_loader/loader.py"; \
+    cp /opt/opd/opd_serve/sglang_patches/configs/load_config.py     "$SGL/srt/configs/load_config.py"; \
+    cp /opt/opd/opd_serve/sglang_patches/server_args.py             "$SGL/srt/server_args.py"; \
+    cp "$SGL/srt/configs/model_config.py" /tmp/mc_stock.py; \
+    "${SERVE_VENV}/bin/python" "${OPD_REPO}/training/opd_v2/flash_rl/patches/apply_swa_patch.py" \
+        /tmp/mc_stock.py "$SGL/srt/configs/model_config.py"; \
+    rm -f /tmp/mc_stock.py; \
+    "${SERVE_VENV}/bin/python" - <<'PY'
+import inspect
+import sglang.srt.models.olmo2 as m
+import sglang.srt.model_loader.loader          # noqa: F401  flash_rl loader
+import sglang.srt.server_args                  # noqa: F401
+import sglang.srt.layers.radix_attention as r
+import sglang.srt.layers.attention.triton_backend as t
+import sglang.srt.configs.model_config as mc
+assert hasattr(m, "Olmo3SinkForCausalLM"), "olmo2 sink model missing"
+assert "Olmo3SinkForCausalLM" in inspect.getsource(mc), "SWA hybrid-pool patch did not land"
+tb_src = inspect.getsource(t)
+print("serve OK: Olmo3Sink model +",
+      "radix sinks" if "sinks" in inspect.getsource(r) else "NO radix sinks",
+      "+ triton extend/decode sink-lines", tb_src.count("sinks="),
+      "+ SWA hybrid-pool patched (Olmo3Sink in hybrid_swa_archs)")
+PY
+
+# Teacher: generate + apply the DeepSeek-V4-Flash hidden-extract patches (re-anchored for 0.5.14 in
+# teacher_extract/_patch_sglang_514.py). 5 anchored patches: post-norm hidden gate + fp8 wo_a streaming
+# dequant (deepseek_v4), per-req extend-len snapshot (scheduler), disk-spool hidden append
+# (scheduler_components/batch_result_processor), per-chunk truncation skip in spool mode
+# (scheduler_components/output_streamer), and the /score route (http_server).
+RUN set -eux; \
+    SGL="$(${SERVE_VENV}/bin/python -c 'import sglang,os;print(os.path.dirname(sglang.__file__))')"; \
+    TE="${OPD_REPO}/training/teacher_extract"; \
+    mkdir -p /tmp/tsrc /tmp/tout; \
+    cp "$SGL/srt/models/deepseek_v4.py"                             /tmp/tsrc/; \
+    cp "$SGL/srt/managers/scheduler.py"                            /tmp/tsrc/; \
+    cp "$SGL/srt/managers/scheduler_components/batch_result_processor.py" /tmp/tsrc/; \
+    cp "$SGL/srt/managers/scheduler_components/output_streamer.py"        /tmp/tsrc/; \
+    cp "$SGL/srt/entrypoints/http_server.py"                       /tmp/tsrc/; \
+    "${SERVE_VENV}/bin/python" "$TE/_patch_sglang_514.py" /tmp/tsrc /tmp/tout; \
+    cp /tmp/tout/deepseek_v4.py            "$SGL/srt/models/deepseek_v4.py"; \
+    cp /tmp/tout/scheduler.py              "$SGL/srt/managers/scheduler.py"; \
+    cp /tmp/tout/batch_result_processor.py "$SGL/srt/managers/scheduler_components/batch_result_processor.py"; \
+    cp /tmp/tout/output_streamer.py        "$SGL/srt/managers/scheduler_components/output_streamer.py"; \
+    cp /tmp/tout/http_server.py            "$SGL/srt/entrypoints/http_server.py"; \
+    "${SERVE_VENV}/bin/python" -c "import sglang.srt.models.deepseek_v4, sglang.srt.entrypoints.http_server, sglang.srt.managers.scheduler_components.batch_result_processor, sglang.srt.managers.scheduler_components.output_streamer; print('teacher hidden-extract patches applied + import OK')"; \
+    rm -rf /tmp/tsrc /tmp/tout
+
+WORKDIR /opt/opd/repo/training/opd_v2
+# No ENTRYPOINT — launched per-role on a single node (one GPU each). Serve scripts baked at /opt/opd/opd_serve:
+#   teacher:      CUDA_VISIBLE_DEVICES=3 /opt/opd/opd_serve/run_teacher.sh --tp 1 --port 8100
+#   rollout:      CUDA_VISIBLE_DEVICES=1 MODEL=<student-deploy> /opt/opd/opd_serve/run_rollout.sh --port 8201
+#   trainer:      CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 -m opd_v2.trainer.service --run-dir $OPD_RUN_DIR
+#   orchestrator: ATTN_IMPL=olmo3_sink_fa2 ROLLOUT_URLS=... TEACHER_URLS=... python examples/make_config.py \
+#                 && python -m opd_v2.orchestrator --run-dir $OPD_RUN_DIR
+# Default CMD runs the central attention-sink test suite (self-check the image on a GPU box).
+CMD ["python", "/opt/opd/test_attention_sink.py", "--group", "all"]
