@@ -113,7 +113,14 @@ class Olmo2Attention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.max_position_embeddings = config.max_position_embeddings
-        self.rope_theta = config.rope_parameters["rope_theta"]
+        # config-format-robust rope_theta: sglang's custom Olmo3Config keeps rope_theta as a top-level
+        # attribute for legacy-rope configs (top-level rope_theta + rope_scaling, as the deploy student
+        # uses) while nesting it in rope_parameters for newer configs. Stock olmo2.py reads only
+        # rope_parameters["rope_theta"] -> KeyError on the legacy config. Read whichever is present
+        # (same value, 500000); no behavior change for configs that already nest it.
+        self.rope_theta = (getattr(config, "rope_parameters", None) or {}).get(
+            "rope_theta", getattr(config, "rope_theta", 10000.0)
+        )
 
         # Attention input projection. Projects x -> (q, k, v)
         self.qkv_proj = QKVParallelLinear(
