@@ -78,7 +78,7 @@ for n in "${TEACHER_NODES[@]}"; do
         gpus=$(seq -s, $((i*'"$TEACHER_TP"')) $((i*'"$TEACHER_TP"'+'"$TEACHER_TP"'-1)))
         port=$(('"$T_PORT0"'+i)); dist=$(('"$T_DIST0"'+i)); nccl=$(('"$T_NCCL0"'+i))
         CUDA_VISIBLE_DEVICES=$gpus SPOOL=/dev/shm/opd-v2-tea-$port MALLOC_ARENA_MAX=4 \
-          DIST_INIT_ADDR=127.0.0.1:$dist SGLANG_NCCL_PORT=$nccl \
+          DIST_INIT_PORT=$dist SGLANG_NCCL_PORT=$nccl \
           MEMFRAC='"${TEACHER_MEMFRAC:-}"' MAXRUN='"${TEACHER_MAXRUN:-}"' \
           bash '"$ROLE_DIR"'/run_teacher.sh --tp '"$TEACHER_TP"' --port $port \
           > '"$RUN_DIR"'/teacher_'"$n"'_$port.log 2>&1 &
