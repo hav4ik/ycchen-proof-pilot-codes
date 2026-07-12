@@ -8,6 +8,7 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 ## Documents
 | doc | what it covers |
 |---|---|
+| [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) | **runbook**: single-node 8×H200 end-to-end shakeout (40k, 4:2:2) — the final integration test before 64× B200, with the paste-ready command |
 | [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) | how her algorithm works — 4-process arch, the agentic self-play environment, the rollout `produce_sample` atom, JSD distillation, weight-sync & staleness |
 | [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md) | every config knob + env override + her best OPD-32B run (V33) values |
 | [OPD_V2_PARITY_STATUS.md](OPD_V2_PARITY_STATUS.md) | the cu13 ↔ cu128/sglang-0.5.14 parity matrix, adversarial findings, and what's baked/verified |
@@ -15,6 +16,11 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 | [../docker/cu128/README.md](../docker/cu128/README.md) | how to build/run the cu128 image |
 
 ## Change log (newest first)
+
+### H200 single-node shakeout runbook + minimal preset
+Added [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) (paste-ready `docker run`, config table, monitoring,
+troubleshooting) and retuned `env_1node_smoke.sh` to a minimal 40k / small-batch / ~20-step end-to-end
+config (all knobs env-overridable). Scaled-down run of her exact algorithm, faithful knobs unchanged.
 
 ### Container launchers (faithful ports of run_mn.sh)
 Added `docker/cu128/launch/`: `run_mn_cu128.sh` (multi-node, her V33 topology) + `env_v33_b200.sh`,
