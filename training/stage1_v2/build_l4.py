@@ -112,7 +112,10 @@ def render_shard(args) -> dict:
                 ids, labels = rendered.input_ids, rendered.labels
                 if len(ids) > max_len:
                     ids, labels = ids[:max_len], labels[:max_len]
-                    if all(l == IGNORE for l in labels):
+                    # Drop overlong docs: truncation always cuts the trailing EOS (the final
+                    # token), so keeping them would train non-termination (termination-by-
+                    # length-truncation). Drop rather than re-append a false mid-sentence EOS.
+                    if all(l == IGNORE for l in labels) or ids[-1] != tok.eos_token_id:
                         dropped += 1
                         continue
                     truncated += 1

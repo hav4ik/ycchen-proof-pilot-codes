@@ -88,7 +88,7 @@ class RolloutClient:
         return list(out), wv, (fr if isinstance(fr, str) else None)
 
     # ---- weight sync (orchestrator-driven; parallel across all replicas, V22) ----
-    async def pause_generation(self, mode: str = "in_place", timeout: float = 120.0) -> dict:
+    async def pause_generation(self, mode: str = "retract", timeout: float = 120.0) -> dict:
         async with self.s.post(f"{self.base}/pause_generation", json={"mode": mode},
                                timeout=aiohttp.ClientTimeout(total=timeout)) as r:
             r.raise_for_status()
@@ -102,8 +102,8 @@ class RolloutClient:
             return await r.json()
 
     async def update_weights_from_disk(self, path: str, weight_version: int,
-                                       flush_cache: bool = False, timeout: float = 1800.0) -> dict:
-        """flush_cache=False for in_place pause (required: under in_place a failed flush asserts and kills the scheduler).
+                                       flush_cache: bool = True, timeout: float = 1800.0) -> dict:
+        """Reload after a retract pause and flush all KV computed by old weights.
         **Do not send load_format**: keeps the server's flash_rl fp8 loader (sending auto goes through DefaultLoader and blows up, §5.6)."""
         payload = {"model_path": path, "flush_cache": flush_cache,
                    "weight_version": str(weight_version)}

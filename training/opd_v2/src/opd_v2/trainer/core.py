@@ -588,13 +588,147 @@ class OPDTrainerV2:
             self._copy_config_files(path)           # add config/tokenizer -> path becomes a complete HF model dir
         if self.world > 1:
             torch.distributed.barrier()
+        validation_error = None
+        if self.rank == 0:
+            try:
+                self._validate_rollout_sink_checkpoint(path)
+            except Exception as exc:
+                validation_error = f"{type(exc).__name__}: {exc}"
+        if self.world > 1:
+            result = [validation_error]
+            torch.distributed.broadcast_object_list(result, src=0)
+            validation_error = result[0]
+        if validation_error is not None:
+            raise RuntimeError(
+                f"rollout checkpoint sink validation failed: {validation_error}"
+            )
         return {"path": path, "weight_version": self.step}
+
+    def _validate_rollout_sink_checkpoint(self, path: str) -> None:
+        """Verify the rollout artifact carries every learned sink before publish."""
+        import hashlib
+        import json
+        import math
+        from safetensors import safe_open
+
+        with open(os.path.join(path, "config.json")) as fh:
+            config = json.load(fh)
+        architectures = config.get("architectures") or []
+        if "Olmo3SinkForCausalLM" not in architectures:
+            raise ValueError(
+                f"deploy config does not select Olmo3SinkForCausalLM: {architectures}"
+            )
+        num_layers = int(config["num_hidden_layers"])
+        num_heads = int(config["num_attention_heads"])
+        num_kv_heads = int(config["num_key_value_heads"])
+        hidden_size = int(config["hidden_size"])
+        head_dim = int(config.get("head_dim", hidden_size // num_heads))
+        expected = {
+            f"model.layers.{layer}.self_attn.sinks" for layer in range(num_layers)
+        }
+        critical_shapes = {"model.norm.weight": (hidden_size,)}
+        for layer in range(num_layers):
+            prefix = f"model.layers.{layer}"
+            critical_shapes.update(
+                {
+                    f"{prefix}.self_attn.sinks": (num_heads,),
+                    f"{prefix}.self_attn.q_norm.weight": (hidden_size,),
+                    f"{prefix}.self_attn.k_norm.weight": (
+                        num_kv_heads * head_dim,
+                    ),
+                    f"{prefix}.post_attention_layernorm.weight": (hidden_size,),
+                    f"{prefix}.post_feedforward_layernorm.weight": (hidden_size,),
+                }
+            )
+
+        index_path = os.path.join(path, "model.safetensors.index.json")
+        if os.path.exists(index_path):
+            with open(index_path) as fh:
+                weight_map = json.load(fh)["weight_map"]
+        else:
+            filename = "model.safetensors"
+            with safe_open(
+                os.path.join(path, filename), framework="pt", device="cpu"
+            ) as handle:
+                weight_map = {name: filename for name in handle.keys()}
+        missing_critical = sorted(set(critical_shapes) - set(weight_map))
+        if missing_critical:
+            raise ValueError(
+                f"missing sink/norm tensors: {missing_critical}"
+            )
+        provided = {name for name in weight_map if name.endswith(".self_attn.sinks")}
+        if provided != expected:
+            raise ValueError(
+                f"sink tensor mismatch: missing={sorted(expected - provided)}, "
+                f"unexpected={sorted(provided - expected)}"
+            )
+
+        digest = hashlib.sha256()
+        values = []
+        names_by_file = {}
+        for name in expected:
+            names_by_file.setdefault(weight_map[name], []).append(name)
+        for filename, names in sorted(names_by_file.items()):
+            with safe_open(
+                os.path.join(path, filename), framework="pt", device="cpu"
+            ) as handle:
+                for name in sorted(names):
+                    tensor = handle.get_tensor(name)
+                    if tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != (
+                        num_heads,
+                    ):
+                        raise ValueError(
+                            f"invalid sink {name}: dtype={tensor.dtype}, "
+                            f"shape={tuple(tensor.shape)}"
+                        )
+                    float_tensor = tensor.float()
+                    if not torch.isfinite(float_tensor).all():
+                        raise ValueError(f"non-finite sink values in {name}")
+                    digest.update(name.encode("utf-8"))
+                    digest.update(tensor.view(torch.uint8).numpy().tobytes())
+                    values.extend(float_tensor.tolist())
+
+        norm_names_by_file = {}
+        for name in set(critical_shapes) - expected:
+            norm_names_by_file.setdefault(weight_map[name], []).append(name)
+        for filename, names in sorted(norm_names_by_file.items()):
+            with safe_open(
+                os.path.join(path, filename), framework="pt", device="cpu"
+            ) as handle:
+                for name in sorted(names):
+                    tensor = handle.get_tensor(name)
+                    if tensor.dtype != torch.bfloat16 or tuple(tensor.shape) != (
+                        critical_shapes[name]
+                    ):
+                        raise ValueError(
+                            f"invalid normalization weight {name}: "
+                            f"dtype={tensor.dtype}, shape={tuple(tensor.shape)}"
+                        )
+                    if not torch.isfinite(tensor.float()).all():
+                        raise ValueError(f"non-finite normalization values in {name}")
+
+        manifest = {
+            "count": len(expected),
+            "heads_per_layer": num_heads,
+            "validated_norm_count": len(critical_shapes) - len(expected),
+            "dtype": "BF16",
+            "sha256": digest.hexdigest(),
+            "min": min(values),
+            "max": max(values),
+            "mean": math.fsum(values) / len(values),
+            "weight_version": self.step,
+        }
+        tmp = os.path.join(path, "attention_sinks.json.tmp")
+        with open(tmp, "w") as fh:
+            json.dump(manifest, fh, indent=2, sort_keys=True)
+        os.replace(tmp, os.path.join(path, "attention_sinks.json"))
 
     def _clean_weight_dir(self, path: str) -> None:
         """Remove old weight files from the buffer directory (avoid single<->multi switch leftovers / old shards leaking into sglang glob)."""
         import glob as _glob
         for f in (_glob.glob(os.path.join(path, "model*.safetensors")) +
-                  _glob.glob(os.path.join(path, "*.index.json"))):
+                  _glob.glob(os.path.join(path, "*.index.json")) +
+                  _glob.glob(os.path.join(path, "attention_sinks.json*"))):
             try:
                 os.remove(f)
             except OSError:
