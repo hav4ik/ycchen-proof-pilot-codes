@@ -222,7 +222,7 @@ class Orchestrator:
             return results
 
         await gather_stage(
-            "pause", [c.pause_generation("retract") for c in self.rollout_clients]
+            "pause", [c.pause_generation("abort") for c in self.rollout_clients]
         )
         res = await gather_stage(
             "reload",

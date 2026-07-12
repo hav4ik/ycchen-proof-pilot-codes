@@ -58,37 +58,50 @@ class RolloutClient:
         if top_k and top_k > 0:
             sp["top_k"] = top_k
         payload = {"input_ids": input_ids, "sampling_params": sp, "stream": False}
-        async with self.s.post(f"{self.base}/generate", json=payload,
-                               timeout=aiohttp.ClientTimeout(total=timeout)) as r:
-            if r.status != 200:
-                raise RolloutError(f"/generate -> {r.status}: {(await r.text())[:200]}")
-            data = await r.json()
-        if isinstance(data, list):
-            data = data[0] if data else {}
-        if not isinstance(data, dict):
-            raise RolloutError(f"unexpected /generate response type {type(data)}")
-        meta = data.get("meta_info") or {}
-        out = data.get("output_ids")
-        if out is None:                       # some sglang versions put output_ids in meta_info
-            out = meta.get("output_ids")
-        if out is None:
-            raise RolloutError(f"/generate response has no output_ids (keys={list(data)})")
-        # sglang reports "default" until first update_weights_from_disk(weight_version=...) ->
-        # anything non-numeric becomes None, and the produce side falls back to the orchestrator's current weight_version.
-        wv = None
-        wv_raw = meta.get("weight_version")
-        if wv_raw not in (None, ""):
-            try:
-                wv = int(wv_raw)
-            except (ValueError, TypeError):
-                wv = None
-        fr = meta.get("finish_reason")
-        if isinstance(fr, dict):
-            fr = fr.get("type")
-        return list(out), wv, (fr if isinstance(fr, str) else None)
+        for attempt in range(3):
+            async with self.s.post(
+                f"{self.base}/generate",
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as r:
+                if r.status != 200:
+                    raise RolloutError(
+                        f"/generate -> {r.status}: {(await r.text())[:200]}"
+                    )
+                data = await r.json()
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                raise RolloutError(f"unexpected /generate response type {type(data)}")
+            meta = data.get("meta_info") or {}
+            out = data.get("output_ids")
+            if out is None:
+                out = meta.get("output_ids")
+            if out is None:
+                raise RolloutError(
+                    f"/generate response has no output_ids (keys={list(data)})"
+                )
+            wv = None
+            wv_raw = meta.get("weight_version")
+            if wv_raw not in (None, ""):
+                try:
+                    wv = int(wv_raw)
+                except (ValueError, TypeError):
+                    wv = None
+            fr = meta.get("finish_reason")
+            if isinstance(fr, dict):
+                fr = fr.get("type")
+            if fr == "abort":
+                if attempt == 2:
+                    raise RolloutError(
+                        "generation repeatedly aborted at weight-version boundaries"
+                    )
+                continue
+            return list(out), wv, (fr if isinstance(fr, str) else None)
+        raise AssertionError("unreachable")
 
     # ---- weight sync (orchestrator-driven; parallel across all replicas, V22) ----
-    async def pause_generation(self, mode: str = "retract", timeout: float = 120.0) -> dict:
+    async def pause_generation(self, mode: str = "abort", timeout: float = 120.0) -> dict:
         async with self.s.post(f"{self.base}/pause_generation", json={"mode": mode},
                                timeout=aiohttp.ClientTimeout(total=timeout)) as r:
             r.raise_for_status()
@@ -103,7 +116,7 @@ class RolloutClient:
 
     async def update_weights_from_disk(self, path: str, weight_version: int,
                                        flush_cache: bool = True, timeout: float = 1800.0) -> dict:
-        """Reload after a retract pause and flush all KV computed by old weights.
+        """Reload after an abort pause and flush all KV computed by old weights.
         **Do not send load_format**: keeps the server's flash_rl fp8 loader (sending auto goes through DefaultLoader and blows up, §5.6)."""
         payload = {"model_path": path, "flush_cache": flush_cache,
                    "weight_version": str(weight_version)}

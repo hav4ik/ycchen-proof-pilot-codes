@@ -626,9 +626,30 @@ class OPDTrainerV2:
         expected = {
             f"model.layers.{layer}.self_attn.sinks" for layer in range(num_layers)
         }
+        expected_checkpoint = {
+            "model.embed_tokens.weight",
+            "model.norm.weight",
+            "lm_head.weight",
+        }
         critical_shapes = {"model.norm.weight": (hidden_size,)}
         for layer in range(num_layers):
             prefix = f"model.layers.{layer}"
+            expected_checkpoint.update(
+                {
+                    f"{prefix}.self_attn.q_proj.weight",
+                    f"{prefix}.self_attn.k_proj.weight",
+                    f"{prefix}.self_attn.v_proj.weight",
+                    f"{prefix}.self_attn.o_proj.weight",
+                    f"{prefix}.self_attn.q_norm.weight",
+                    f"{prefix}.self_attn.k_norm.weight",
+                    f"{prefix}.self_attn.sinks",
+                    f"{prefix}.mlp.gate_proj.weight",
+                    f"{prefix}.mlp.up_proj.weight",
+                    f"{prefix}.mlp.down_proj.weight",
+                    f"{prefix}.post_attention_layernorm.weight",
+                    f"{prefix}.post_feedforward_layernorm.weight",
+                }
+            )
             critical_shapes.update(
                 {
                     f"{prefix}.self_attn.sinks": (num_heads,),
@@ -655,6 +676,11 @@ class OPDTrainerV2:
         if missing_critical:
             raise ValueError(
                 f"missing sink/norm tensors: {missing_critical}"
+            )
+        missing_checkpoint = sorted(expected_checkpoint - set(weight_map))
+        if missing_checkpoint:
+            raise ValueError(
+                f"incomplete rollout checkpoint: missing={missing_checkpoint}"
             )
         provided = {name for name in weight_map if name.endswith(".self_attn.sinks")}
         if provided != expected:
@@ -711,6 +737,7 @@ class OPDTrainerV2:
             "count": len(expected),
             "heads_per_layer": num_heads,
             "validated_norm_count": len(critical_shapes) - len(expected),
+            "validated_checkpoint_weight_count": len(expected_checkpoint),
             "dtype": "BF16",
             "sha256": digest.hexdigest(),
             "min": min(values),
