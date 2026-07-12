@@ -23,7 +23,9 @@ STUDENT_PATH = f"{REPO}/outputs/stage1-v2-7b"
 STUDENT_DEPLOY_PATH = f"{REPO}/outputs/stage1-v2-7b-deploy"  # legacy-rope config (safe for rollout reload)
 TEACHER_PATH = os.environ.get("DEEPSEEK_V4_FLASH", "/models/DeepSeek-V4-Flash")
 SGLANG_SIF = os.environ.get("SGLANG_SIF", "/images/sglang.sif")
-HID_DIM = 4096
+HID_DIM = int(os.environ.get("OPD_HID_DIM", "4096"))   # TEACHER hidden dim (codec/W_rot). Default 4096 =
+                                                        # DeepSeek-V4-Flash (unchanged). Set OPD_HID_DIM=5120
+                                                        # for an Olmo3-32B self-distill teacher (H200 test).
 VOCAB_SIZE = 129280
 PAD_ID = 2          # student pad_token_id (used to pad the packing tail; masked out by cu_seqlens/IGNORE)
 EOS_ID = 1

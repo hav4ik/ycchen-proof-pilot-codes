@@ -8,7 +8,8 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 ## Documents
 | doc | what it covers |
 |---|---|
-| [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) | **runbook**: single-node 8×H200 end-to-end shakeout (40k, 4:2:2) — the final integration test before 64× B200, with the paste-ready command |
+| [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) | **runbook**: single-node 8×H200 end-to-end shakeout (40k, 4:2:2, DeepSeek teacher) — the final integration test before 64× B200, paste-ready |
+| [OPD_V2_4GPU_OLMO3.md](OPD_V2_4GPU_OLMO3.md) | **runbook**: single-node 4×H200 test (1:1:2) — Olmo3-32B ← Olmo3-32B (two checkpoints = real distill, or self-distill = codec correctness check) |
 | [OPD_V2_ALGORITHM.md](OPD_V2_ALGORITHM.md) | how her algorithm works — 4-process arch, the agentic self-play environment, the rollout `produce_sample` atom, JSD distillation, weight-sync & staleness |
 | [OPD_V2_CONFIG_REFERENCE.md](OPD_V2_CONFIG_REFERENCE.md) | every config knob + env override + her best OPD-32B run (V33) values |
 | [OPD_V2_PARITY_STATUS.md](OPD_V2_PARITY_STATUS.md) | the cu13 ↔ cu128/sglang-0.5.14 parity matrix, adversarial findings, and what's baked/verified |
@@ -16,6 +17,13 @@ port of the attention-sink kernels, the sglang serve patches, and the container.
 | [../docker/cu128/README.md](../docker/cu128/README.md) | how to build/run the cu128 image |
 
 ## Change log (newest first)
+
+### 4×H200 Olmo3-32B←Olmo3-32B test + additive teacher knobs
+Added a 4-GPU (1:1:2) test using an Olmo3-32B teacher (DeepSeek needs TP4). Two additive config knobs
+(both default to her exact values): `OPD_HID_DIM` (teacher hidden dim; default 4096) and `TEACHER_PATH`
+(W_rot head; default her DeepSeek path). New `run_teacher_olmo3.sh` (triton sink + return-hidden + bf16),
+`env_4gpu_olmo3.sh`, `run_1node.sh` parameterized for `TEACHER_SCRIPT`/`TEACHER_MODEL`, and
+[OPD_V2_4GPU_OLMO3.md](OPD_V2_4GPU_OLMO3.md). (`DeepSeek-V4-Pro-Tiny` unusable: hidden 500 fails the codec `%32` assert.)
 
 ### H200 single-node shakeout runbook + minimal preset
 Added [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md) (paste-ready `docker run`, config table, monitoring,

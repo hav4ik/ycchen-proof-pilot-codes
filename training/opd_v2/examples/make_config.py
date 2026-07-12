@@ -53,6 +53,9 @@ def main():
     # student model (for switching to a long-context softdistill model; the deploy variant provides a rope-safe config for the weight-sync checkpoint)
     cfg.trainer.student_path = _env("STUDENT_PATH", cfg.trainer.student_path)
     cfg.trainer.deploy_config_src = _env("STUDENT_DEPLOY_PATH", cfg.trainer.deploy_config_src)
+    # teacher model for the W_rot head build (build_w_rot(teacher_path, HID_DIM)). Default = her
+    # DeepSeek path; set TEACHER_PATH=<student> for a self-distill test (with OPD_HID_DIM=that model's hidden).
+    cfg.trainer.teacher_path = _env("TEACHER_PATH", cfg.trainer.teacher_path)
     # attention impl: default olmo3_sink_fa3 (patched Hopper FA3). On B200/sm_100 (no FA3) set
     # ATTN_IMPL=olmo3_sink_fa2 -> our post-correction sink on stock FA2. Do NOT use stock
     # flash_attention_2: transformers silently DROPS the sink there (only FA3 s_aux / FA4 honor it).

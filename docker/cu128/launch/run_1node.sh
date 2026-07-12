@@ -41,12 +41,16 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ---- 1) teacher (DeepSeek-V4-Flash, TP4) ----
-echo ">>> teacher on GPU $TEACHER_GPUS (TP$TEACHER_TP) :$T_PORT" | tee -a "$MAIN"
+# ---- 1) teacher ----
+# TEACHER_SCRIPT: run_teacher.sh (DeepSeek-V4-Flash, default) | run_teacher_olmo3.sh (Olmo3 self/x: triton sink).
+# TEACHER_MODEL: the teacher checkpoint (DeepSeek default; for Olmo3 set to the teacher Olmo3-32B ckpt).
+TEACHER_SCRIPT="${TEACHER_SCRIPT:-run_teacher.sh}"
+echo ">>> teacher [$TEACHER_SCRIPT] on GPU $TEACHER_GPUS (TP$TEACHER_TP) :$T_PORT" | tee -a "$MAIN"
 CUDA_VISIBLE_DEVICES=$TEACHER_GPUS SPOOL=/dev/shm/opd1node-tea MALLOC_ARENA_MAX=4 \
   SGLANG_NCCL_PORT=$((T_PORT+400)) \
+  MODEL="${TEACHER_MODEL:-${DEEPSEEK_V4_FLASH:-}}" \
   MEMFRAC="${TEACHER_MEMFRAC:-}" MAXRUN="${TEACHER_MAXRUN:-}" \
-  bash "$ROLE_DIR/run_teacher.sh" --tp "$TEACHER_TP" --port "$T_PORT" > "$RUN_DIR/teacher.log" 2>&1 &
+  bash "$ROLE_DIR/$TEACHER_SCRIPT" --tp "$TEACHER_TP" --port "$T_PORT" > "$RUN_DIR/teacher.log" 2>&1 &
 PIDS+=($!); TURLS="http://127.0.0.1:$T_PORT"
 
 # ---- 2) rollout (student, fp8, triton sink) ----
