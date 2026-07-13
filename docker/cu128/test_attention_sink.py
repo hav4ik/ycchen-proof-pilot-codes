@@ -160,7 +160,11 @@ def satisfies(pr: dict, tok: str, server: str | None) -> tuple[bool, str]:
 
 def pick_venv(t: Target, venvs: dict, probes: dict, server: str | None):
     """First venv whose probe satisfies all of t.needs; return (py, probe) or (None, reason)."""
-    order = ["train", "serve", "system"]
+    # Default: prefer "system" over "serve". The trainer venv is /opt/conda (cu128) and is reachable
+    # only as "system" (there is no /opt/venv/train). "serve" is cu130 and must NOT run trainer-path
+    # GPU tests (e.g. opd_v2_fa2_smoke, which hard-asserts cu12.8). On a NATIVE-cuda-13 B200 the serve
+    # venv is CUDA-visible, so putting it before "system" wrongly grabbed it -> cu12.8 guard tripped.
+    order = ["train", "system", "serve"]
     if "olmo_core" in t.needs:
         order = ["system", "train", "serve"]  # olmo_core usually lives in the SFT/system env
     if "sglang" in t.needs:
