@@ -7,7 +7,9 @@
 # Topology (env-overridable): the allocation's nodes are split into teacher / rollout /
 # trainer segments.
 #   TEACHER_NNODES (default 1) + ROLLOUT_NNODES (default 1) + the rest = trainer.
-#   TEACHERS_PER_NODE (default 2 x TP4), ROLLOUTS_PER_NODE (default 8 x TP1 fp8).
+#   TEACHERS_PER_NODE (default 2 x TP4), ROLLOUTS_PER_NODE (default 8 x TP1 x DP1 fp8).
+#   Set ROLLOUTS_PER_NODE=1 ROLLOUT_TP=1 ROLLOUT_DP=8 for one native-SGLang-DP
+#   endpoint per eight-GPU rollout node.
 # Medium: hidden states + weights both live on the shared FS (under run_dir) -> rollout/
 # trainer read them directly across nodes (P7 fix).
 #
@@ -50,8 +52,15 @@ HEAD="${TRAINER_NODES_ARR[0]}"                      # orchestrator + rdzv head
 
 TEACHER_TP=${TEACHER_TP:-4}
 ROLLOUT_TP=${ROLLOUT_TP:-1}
+ROLLOUT_DP=${ROLLOUT_DP:-1}
 TEACHERS_PER_NODE=${TEACHERS_PER_NODE:-2}           # 2 x TP4 = 8 GPU/node
-ROLLOUTS_PER_NODE=${ROLLOUTS_PER_NODE:-8}           # 8 x TP1 fp8 = 8 GPU/node
+ROLLOUTS_PER_NODE=${ROLLOUTS_PER_NODE:-8}           # 8 x TP1 x DP1 fp8 = 8 GPU/node
+ROLLOUT_GPUS_PER_SERVER=$((ROLLOUT_TP * ROLLOUT_DP))
+if [ "$ROLLOUT_DP" -lt 1 ] || [ "$ROLLOUT_GPUS_PER_SERVER" -lt 1 ] || \
+   [ $((ROLLOUTS_PER_NODE * ROLLOUT_GPUS_PER_SERVER)) -gt 8 ]; then
+  echo "invalid rollout layout: servers/node=$ROLLOUTS_PER_NODE tp=$ROLLOUT_TP dp=$ROLLOUT_DP exceeds 8 GPUs" | tee -a "$MAIN"
+  exit 1
+fi
 # PORT_SHIFT cap: the highest port (T_NCCL0 base 38600) + shift must stay <= 65535:
 #   %800*32 -> max shift 25568 -> 38600+25568 = 64168 < 65535 (%1000*32=31968 would
 #   overflow the teacher nccl port).
@@ -67,7 +76,7 @@ NCCL_ENV="NCCL_DEBUG=WARN TORCH_NCCL_ASYNC_ERROR_HANDLING=1 PYTORCH_CUDA_ALLOC_C
 [ -n "${NCCL_IB_HCA:-}" ] && NCCL_ENV="NCCL_IB_HCA=$NCCL_IB_HCA $NCCL_ENV"
 [ -n "${NCCL_SOCKET_IFNAME:-}" ] && NCCL_ENV="NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME $NCCL_ENV"
 
-echo ">>> nodes=$NN teacher=[${TEACHER_NODES[*]}]x$TEACHERS_PER_NODE(TP$TEACHER_TP) rollout=[${ROLLOUT_NODES[*]}]x$ROLLOUTS_PER_NODE(TP$ROLLOUT_TP fp8) trainer=[$TRAINER_NODES](world=$((8*TRAINER_NNODES))) head=$HEAD" | tee -a "$MAIN"
+echo ">>> nodes=$NN teacher=[${TEACHER_NODES[*]}]x$TEACHERS_PER_NODE(TP$TEACHER_TP) rollout=[${ROLLOUT_NODES[*]}]x$ROLLOUTS_PER_NODE(TP$ROLLOUT_TP,DP$ROLLOUT_DP fp8) trainer=[$TRAINER_NODES](world=$((8*TRAINER_NNODES))) head=$HEAD" | tee -a "$MAIN"
 
 SERVER_PIDS=()
 cleanup() {
@@ -108,11 +117,11 @@ for n in "${ROLLOUT_NODES[@]}"; do
   srun --jobid="$HOLDER" --overlap --nodelist="$n" --nodes=1 --ntasks=1 --gres=gpu:8 --cpus-per-task=96 \
     bash -c '
       for i in $(seq 0 '"$((ROLLOUTS_PER_NODE-1))"'); do
-        gpus=$(seq -s, $((i*'"$ROLLOUT_TP"')) $((i*'"$ROLLOUT_TP"'+'"$ROLLOUT_TP"'-1)))
+        gpus=$(seq -s, $((i*'"$ROLLOUT_GPUS_PER_SERVER"')) $((i*'"$ROLLOUT_GPUS_PER_SERVER"'+'"$ROLLOUT_GPUS_PER_SERVER"'-1)))
         port=$(('"$R_PORT0"'+i))
         CUDA_VISIBLE_DEVICES=$gpus MALLOC_ARENA_MAX=4 \
         MODEL='"${ROLLOUT_MODEL:-}"' KV_CACHE_DTYPE='"${KV_CACHE_DTYPE:-}"' SWA_RATIO='"${SWA_RATIO:-}"' CONTEXT_LEN='"${CONTEXT_LEN:-}"' MEMFRAC='"${MEMFRAC:-}"' MAXRUN='"${ROLLOUT_MAXRUN:-}"' \
-          bash '"$OPD_V2"'/flash_rl/run_rollout_fp8.sh --port $port --tp '"$ROLLOUT_TP"' \
+          bash '"$OPD_V2"'/flash_rl/run_rollout_fp8.sh --port $port --tp '"$ROLLOUT_TP"' --dp '"$ROLLOUT_DP"' \
           > '"$RUN_DIR"'/rollout_'"$n"'_$port.log 2>&1 &
       done; wait
     ' > "$RUN_DIR/rolloutsrun_$n.log" 2>&1 &

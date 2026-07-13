@@ -93,10 +93,11 @@ rollout URL, while SGLang load-balances its requests across eight GPUs.
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MAXRUN=48 \
   ./run_rollout_fp8.sh --port 8200 --tp 1 --dp 8
 
-# A second policy node starts the same command on :8200. OPD sees two endpoints.
-export ROLLOUT_URLS="http://policy-a:8200,http://policy-b:8200"
+# Five eight-GPU B200 policy nodes each start the same command on :8200.
+# OPD sees five endpoints and SGLang dispatches across 40 one-GPU replicas.
+export ROLLOUT_URLS="http://policy-0:8200,http://policy-1:8200,http://policy-2:8200,http://policy-3:8200,http://policy-4:8200"
 export ROLLOUT_MAXRUN=48
-export TARGET_INFLIGHT=768  # 16 GPU replicas x 48 requests; tune for teacher/buffer capacity.
+export TARGET_INFLIGHT=1920  # 5 nodes x 8 replicas x 48 requests; tune for teacher/buffer capacity.
 ```
 
 `--dp` here maps directly to SGLang `--dp-size`; it is not a `--replicas`
@@ -104,6 +105,18 @@ alias. Do not add `--enable-dp-attention` for OLMo3Sink: that is the separate
 MLA/MoE-oriented DPA mode, while this deployment needs ordinary full-model DP.
 The native controller is single-node only for ordinary DP, so run one server on
 each policy node and list the node endpoints in `ROLLOUT_URLS`.
+
+`examples/run_mn.sh` supports the same layout directly:
+
+```bash
+ROLLOUT_NNODES=5 ROLLOUTS_PER_NODE=1 ROLLOUT_TP=1 ROLLOUT_DP=8 \
+  ROLLOUT_MAXRUN=48 TARGET_INFLIGHT=1920 \
+  bash examples/run_mn.sh
+```
+
+The launcher validates `ROLLOUTS_PER_NODE * ROLLOUT_TP * ROLLOUT_DP <= 8`,
+which matches an eight-GPU B200 node. Set `ROLLOUT_NNODES` and
+`TARGET_INFLIGHT` proportionally for a smaller allocation.
 
 ### Fallback: independent processes
 
