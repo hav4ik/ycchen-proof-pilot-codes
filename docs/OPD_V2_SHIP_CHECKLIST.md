@@ -80,6 +80,15 @@ before shipping, and prove no code/config commit is un-baked (§1).**
       | `CHECKPOINT_EVERY` | 0 (smoke) / 5 (test) | **50** |
 - [ ] Her training config intact: `LR=1e-5`, `constant` schedule (no warmup), `β=1.0`, adam `(0.9, 0.95)`,
       `MAX_STEPS=100000`, `max_staleness=0`.
+- [ ] **Teacher serve backend = hers, unmodified.** `run_teacher.sh` keeps `MOE_BACKEND=auto` (the stock
+      `apply_deepseek_v4_defaults` hook picks `dsv4` attention + fp8-e4m3 KV + a DeepGEMM fp8 MoE on sm100)
+      and does **NOT** enable `--enable-deepseek-v4-fp4-indexer`. Rationale (locked 2026-07-13): the teacher
+      runs **prefill-only** (`/score` = one forward pass, no `max_new_tokens`/decode), so the fp4-indexer
+      cache's benefit (compressing a *growing decode* cache) doesn't apply — it would only add a sparse-top-k
+      precision perturbation to the distillation target. A teammate's vLLM `deep_gemm_mega_moe` +
+      `use_fp4_indexer_cache` is a decode-oriented throughput lever, not a fit for our prefill-only teacher.
+      Both remain **benchmark-only overrides** (`MOE_BACKEND=deep_gemm`; fp4 indexer not wired) — adopt only
+      on a real throughput win **and** byte-exact `/score` parity, and flag as a deviation.
 
 ## §5 — Ops (so the B200 run doesn't stall on cold start)
 
