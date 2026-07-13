@@ -48,20 +48,31 @@ scripts arch+role-scope it (`sm100/{teacher,rollout}/…`), so the first replica
 replica + future run reuses it**. Point it at Weka so it survives job restarts. (An image-baked pre-warm to
 skip even the first compile is prepared but pending a HuggingFace outage; the writable dir is what matters.)
 
-## 3 · Fill the Beaker placeholders (both yamls, same set)
+## 3 · Fill the Beaker spec — most of it is already done
 
-In `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke), replace every
-`<PLACEHOLDER: …>`:
-- `budget` — e.g. `ai2/oe-training`
-- `constraints.cluster` — your B200 cluster name
-- `datasets` Weka `weka: <bucket>` + `subPath:` for the run dir + both models (the **run-dir mount must be
-  WRITABLE** — Weka experiment mounts are RW at Ai2 in practice; confirm on your cluster)
-- `JIT_CACHE_DIR` value → a fixed Weka path
-- `NCCL_SOCKET_IFNAME` (e.g. `ib`) + `NCCL_IB_HCA` (e.g. `^=mlx5_bond_0`) for your IB fabric
-- `resources.sharedMemory` (e.g. `128GiB` — the teacher hidden spool lives in `/dev/shm`, default 5 GiB is too small)
-- `context.priority`, `timeout`
-- W&B: set `WANDB_API_KEY` from a Beaker **secret** (`beaker secret write wandb-api-key <key>`); it's already
-  online by default. (`HF_TOKEN` is **not** needed — models + seed dataset are public.)
+Both `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke) are
+**pre-filled against the Beaker docs** — cluster, NCCL, GPU count, shared memory, timeout, and the pinned image
+are already set for **Titan**:
+
+- **Cluster: `ai2/titan-cirrascale`** — 96× **B200 (192 GB)**, 8× IB @ 400 Gbps/GPU. Titan requires
+  **PyTorch ≥2.7 + CUDA 12.8+**; our image satisfies it (trainer torch 2.10+cu128, serve torch 2.11+cu130).
+  Her 8-node V33 uses **64 of the 96 GPUs**; the 3-node smoke uses 24. (Alt: `ai2/holmes` = 576× B300 (288 GB) —
+  also sm_100, the teacher auto-detect handles it; uncomment the line.)
+- **NCCL** pre-set to the Ai2 IB values: `NCCL_SOCKET_IFNAME=ib`, `NCCL_IB_HCA=^=mlx5_bond_0`, `NCCL_DEBUG=INFO`.
+- **`gpuCount: 8`**, **`sharedMemory: 128GiB`**, **`timeout`** — set. Image pinned to the ship digest.
+- **Weka is read-write at Ai2** (jobs write as `root:root`), so `RUN_DIR` + `JIT_CACHE_DIR` under a Weka mount
+  are writable — no special config needed.
+
+**You only fill THREE team-specific values** (each marked `<PLACEHOLDER: …>`, present in both yamls):
+1. **`budget`** — your team's budget account, e.g. `ai2/oe-training`.
+2. **Weka `weka: <bucket>` + `subPath:`** — your team's bucket (see https://weka.allen.ai/), e.g.
+   `oe-training-default`, for the three mounts: the writable run dir (`RUN_DIR` + `JIT_CACHE_DIR` live under it)
+   and the two model dirs from step 1. Also set the `RUN_DIR` / `JIT_CACHE_DIR` env values to paths **under**
+   that mount (defaults `/weka/run/opd_v33` and `/weka/run/jit_cache` assume a mount at `/weka/run`).
+3. **`context.priority`** — your allocation tier on Titan (strict-priority cluster): `low|normal|high|urgent`.
+
+W&B is online by default — set `WANDB_API_KEY` from a Beaker **secret** (`beaker secret write wandb-api-key <key>`,
+then uncomment the `secret:` line). `HF_TOKEN` is **not** needed (models + seed dataset are public).
 
 ## 4 · Submit: smoke first, then the full run
 

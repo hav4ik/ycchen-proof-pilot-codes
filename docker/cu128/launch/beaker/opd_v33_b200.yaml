@@ -60,11 +60,13 @@ tasks:
                                                     # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
                                                     # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
 
-      # ---- B200 NCCL fabric (per beaker-docs distributed-training; confirm for the target cluster) ----
+      # ---- B200 NCCL fabric (ai2 InfiniBand clusters — Titan has 8x IB 400 Gbps/GPU; per beaker-docs) ----
       - name: NCCL_SOCKET_IFNAME
-        value: "<PLACEHOLDER: ib>"                  # e.g. "ib" on ai2 IB clusters; "bond0" on ethernet clusters
+        value: "ib"                                 # all ib* interfaces (avoids the slow ethernet devices)
       - name: NCCL_IB_HCA
-        value: "<PLACEHOLDER: ^=mlx5_bond_0>"       # e.g. "^=mlx5_bond_0" on ai2 IB clusters
+        value: "^=mlx5_bond_0"                       # ai2 IB HCA selector
+      - name: NCCL_DEBUG
+        value: "INFO"                                # drop to WARN once the fabric is confirmed healthy
 
       # ---- optional overrides (uncomment as needed) ----
       # TOPOLOGY: ROLLOUT_NNODES is the ONE balance knob (trainer = 8 - 1 - ROLLOUT_NNODES). Both memory-safe
@@ -94,11 +96,13 @@ tasks:
       #   secret: "<PLACEHOLDER: hf-token>"
 
     datasets:
-      # WRITABLE shared run dir (holds config/endpoint/spool/weights/checkpoints/gather/logs). CRITICAL.
+      # WRITABLE shared run dir (config/endpoint/spool/weights/checkpoints/gather/logs). CRITICAL — the loop
+      # coordinates through it. Weka mounts ARE read-write at Ai2 (jobs write as root:root), so RUN_DIR +
+      # JIT_CACHE_DIR under this mount are writable. Pick YOUR team's bucket (see https://weka.allen.ai/).
       - mountPath: /weka/run
         source:
-          weka: "<PLACEHOLDER: your-weka-bucket>"   # e.g. oe-training-default
-        subPath: "<PLACEHOLDER: opd/run>"           # a per-run writable prefix in the bucket
+          weka: "<PLACEHOLDER: your-weka-bucket>"   # e.g. oe-training-default / oe-adapt-default (your team's)
+        subPath: "<PLACEHOLDER: opd/run>"           # a writable prefix in the bucket (RUN_DIR + JIT_CACHE_DIR live under it)
       # teacher weights (DeepSeek-V4-Flash) — mountPath must not overlap the others
       - mountPath: /models/DeepSeek-V4-Flash
         source:
@@ -111,14 +115,16 @@ tasks:
         subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
 
     resources:
-      gpuCount: 8                                   # whole 8-GPU B200 node per replica
-      sharedMemory: "<PLACEHOLDER: 128GiB>"         # teacher hidden spool lives in /dev/shm (default 5GiB is too small)
+      gpuCount: 8                                   # whole 8-GPU B200 node per replica (Titan = 8x B200/node)
+      sharedMemory: 128GiB                          # teacher hidden spool lives in /dev/shm (default 5GiB is too small)
 
     context:
-      priority: "<PLACEHOLDER: high>"               # low | normal | high | urgent
+      priority: "<PLACEHOLDER: normal>"             # low | normal | high | urgent — YOUR allocation on Titan (strict-priority)
 
     constraints:
       cluster:
-        - "<PLACEHOLDER: ai2/your-b200-cluster>"    # the B200 cluster name
+        - ai2/titan-cirrascale                      # 96x B200 (192 GB), 8x IB 400 Gbps/GPU; meets our cu12.8+/torch>=2.7.
+        #                                             8 nodes x 8 = 64 GPUs (of 96) needed. Strict-priority cluster.
+        # - ai2/holmes                              # alt: 576x B300 (288 GB, 800 Gbps/GPU) — also sm_100, auto-detect handles it
 
-    timeout: "<PLACEHOLDER: 48h>"                   # max job lifespan (cluster may cap this)
+    timeout: 96h                                     # max job lifespan (Titan is strict-priority; cluster may cap this)

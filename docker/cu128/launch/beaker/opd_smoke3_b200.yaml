@@ -56,9 +56,11 @@ tasks:
       - name: JIT_CACHE_DIR                         # fixed shared path (NOT under RUN_DIR) so it persists across runs
         value: "<PLACEHOLDER: /weka/run/jit_cache>"
       - name: NCCL_SOCKET_IFNAME
-        value: "<PLACEHOLDER: ib>"
+        value: "ib"
       - name: NCCL_IB_HCA
-        value: "<PLACEHOLDER: ^=mlx5_bond_0>"
+        value: "^=mlx5_bond_0"
+      - name: NCCL_DEBUG
+        value: "INFO"
       # WANDB_API_KEY is a BLOCKED literal name — use a Beaker secret:
       # - name: WANDB_API_KEY
       #   secret: "<PLACEHOLDER: wandb-api-key>"
@@ -78,17 +80,18 @@ tasks:
         subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
 
     resources:
-      gpuCount: 8                                   # whole 8-GPU B200 node per replica
-      sharedMemory: "<PLACEHOLDER: 128GiB>"         # teacher hidden spool lives in /dev/shm
+      gpuCount: 8                                   # whole 8-GPU B200 node per replica (Titan = 8x B200/node)
+      sharedMemory: 128GiB                          # teacher hidden spool lives in /dev/shm
 
     context:
-      priority: "<PLACEHOLDER: high>"
+      priority: "<PLACEHOLDER: normal>"             # YOUR allocation on Titan (strict-priority)
 
     constraints:
       cluster:
-        - "<PLACEHOLDER: ai2/your-b200-cluster>"
+        - ai2/titan-cirrascale                      # 96x B200 (192 GB); 3 nodes needed for the smoke
+        # - ai2/holmes                              # alt: B300 (288 GB)
 
-    timeout: "<PLACEHOLDER: 6h>"
+    timeout: 6h
 
 # ---- What "green" looks like (watch $RUN_DIR/launch_rank*.log + orchestrator.log) ----
 #   1. all 3 replicas publish their BEAKER_NODE_HOSTNAME to $RUN_DIR/.beaker_hosts_* and the gather barrier passes
