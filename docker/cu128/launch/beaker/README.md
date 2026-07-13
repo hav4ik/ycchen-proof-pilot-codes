@@ -6,9 +6,9 @@ Beaker launcher for Yi-Chia Chen's **V33** OPD v2 run: **64x B200 = 8 nodes x 8 
 > **Status:** the specs are **pre-filled against the Ai2 Beaker docs** for **`ai2/titan-cirrascale`** (96× B200,
 > 192 GB) — cluster, NCCL (`ib`/`^=mlx5_bond_0`), `gpuCount`, `sharedMemory`, `timeout`, and the pinned image are
 > set. You fill **3 team-specific values** (budget, Weka bucket+`subPath`, priority). Run the 3-node smoke first,
-> then the 8-node run. **Full prerequisites → [OPD_V2_AI2_HANDOFF.md](../../../../docs/OPD_V2_AI2_HANDOFF.md).**
+> then the 8-node run. **Full prerequisites → [AI2_HANDOFF.md](AI2_HANDOFF.md).**
 
-## Prerequisites (before submitting) — full detail in [OPD_V2_AI2_HANDOFF.md](../../../../docs/OPD_V2_AI2_HANDOFF.md)
+## Prerequisites (before submitting) — full detail in [AI2_HANDOFF.md](AI2_HANDOFF.md)
 - **Models** (download to Weka, mount read-only): teacher `deepseek-ai/DeepSeek-V4-Flash` → `/models/DeepSeek-V4-Flash`
   (~83 GB); student `chankhavu/yccchen-olmo3-deploy` → `/models/student-deploy` (~64 GB; one deploy checkpoint
   serves BOTH trainer + rollout).

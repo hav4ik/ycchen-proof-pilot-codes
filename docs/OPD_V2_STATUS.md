@@ -155,8 +155,9 @@ bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype �
 4. (Backlog) cu129 serve rebase — cleaner than cu130+forward-compat; not required (serve works native on cuda-13).
 
 ## Doc index (all under `docs/`, on `opd/b200-cu128`)
-**`OPD_V2_AI2_HANDOFF.md` (Ai2 operator guide — the 2 models, writable RUN_DIR + JIT_CACHE_DIR, placeholders,
-submit)** · `OPD_V2_STATUS.md` (this) · `OPD_V2_H200_BRINGUP_FIXES.md` (bugs #1–#10 + gotchas) ·
+**`docker/cu128/launch/beaker/AI2_HANDOFF.md` (Ai2 operator guide — 2 models, writable RUN_DIR + JIT_CACHE_DIR,
+seed, spec-filling; lives WITH the Beaker yamls)** · `OPD_V2_STATUS.md` (this) · `OPD_V2_H200_BRINGUP_FIXES.md`
+(bugs #1–#10 + gotchas) ·
 `OPD_V2_H200_SMOKE.md` (finalization/acceptance checklist) · `OPD_V2_SHIP_CHECKLIST.md` (pre-ship gate) ·
 `OPD_V2_FLASHINFER_SINK.md` (flashinfer eval+decision) · `docker/cu128/launch/beaker/README.md` (Beaker) +
 `beaker/opd_v33_b200.yaml` (64× prod) + `beaker/opd_smoke3_b200.yaml` (3-node smoke) · `OPD_V2_ALGORITHM.md`,

@@ -11,6 +11,10 @@ chankhavu/ycchen-opd:cu128@sha256:4c0d4276dc45fe21877dc0d6d028887f4c8a6d91ae91e1
 ```
 (Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
 
+**In this folder:** [`README.md`](README.md) (submit steps + launcher internals) · [`opd_v33_b200.yaml`](opd_v33_b200.yaml)
+(production spec, 8×B200, her V33 1+4+3) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) (3-node launcher smoke).
+**This file is the prerequisites + spec-filling guide.**
+
 ---
 
 ## 1 · Download the 2 models to Weka (both are PUBLIC — no HF token)
@@ -125,4 +129,5 @@ beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
 - **Memory:** her knobs (`MEMFRAC 0.82`, `MICRO 131072`) were tuned at the ~140 GB (H200) edge; B200's 180 GB
   gives ~40 GB more headroom — nothing needs re-tuning.
 
-Full pre-ship gate: `OPD_V2_SHIP_CHECKLIST.md`. Launcher details: `beaker/README.md`.
+Submit steps + launcher internals: [`README.md`](README.md) (this folder). Full pre-ship gate:
+[`OPD_V2_SHIP_CHECKLIST.md`](../../../../docs/OPD_V2_SHIP_CHECKLIST.md).
