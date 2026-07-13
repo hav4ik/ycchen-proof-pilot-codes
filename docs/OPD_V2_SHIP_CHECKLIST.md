@@ -116,3 +116,10 @@ before shipping, and prove no code/config commit is un-baked (§1).**
 
 > **Ship rule of thumb:** the number that goes to Ai2 is the digest of an image built from a commit where
 > `git log <that-commit>..HEAD -- docker/ training/ *.sh *.py` is **empty**. If it's not empty, rebuild.
+
+> ⏳ **PENDING FINAL REBUILD (B200 bring-up):** `451201a8` (built @`94efb6c`) is missing `8240b78`
+> (`test_attention_sink.py` venv-order fix — **test-only**, does not affect training; production `run_*`
+> scripts already invoke the trainer python directly, and Ai2's cuda-12.8 B200 selects the venv correctly
+> anyway). B200 component testing may surface more small fixes — **batch them into one final drift-clean
+> rebuild before the Ai2 handoff**, then re-stamp the digest here. `451201a8` remains valid for B200 testing
+> (use `python /opt/opd/opd_v2_train_smoke.py` directly instead of the `-k fa2` harness on native-cuda-13 nodes).
