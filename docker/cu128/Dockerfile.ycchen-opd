@@ -216,6 +216,19 @@ RUN set -eux; \
 COPY docker/cu128/launch /opt/opd/launch
 RUN chmod +x /opt/opd/launch/*.sh
 
+# Pre-warmed JIT COMPILE cache (deep_gemm/triton/flashinfer/tvm-ffi kernels for sm_100, TP4; NO autotune -
+# that's env-specific, re-tuned per deployment) so the FIRST B200 launch skips the ~10-20min cold DeepGEMM/JIT
+# compile. run_{teacher,rollout}.sh seed-copy it into JIT_CACHE_DIR on launch (cp -n -> never clobbers a warmer
+# cache). Source = the public HF dataset. Override with `--build-arg JIT_CACHE_URL=<url|none>`; a failed
+# download does NOT fail the build (falls back to runtime compile). Runtime opt-out: JIT_CACHE_SEED=0.
+ARG JIT_CACHE_URL=https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100/resolve/main/opd-jit-sm100-tp4.tgz
+ENV OPD_JIT_CACHE_SEED=/opt/opd/jit-cache-seed
+RUN mkdir -p "$OPD_JIT_CACHE_SEED"; \
+    if [ "$JIT_CACHE_URL" != "none" ] && wget -q -O /tmp/jit-seed.tgz "$JIT_CACHE_URL"; then \
+      tar xzf /tmp/jit-seed.tgz -C "$OPD_JIT_CACHE_SEED" && rm -f /tmp/jit-seed.tgz && \
+      echo "baked JIT seed: $(find "$OPD_JIT_CACHE_SEED" -type f | wc -l) files, $(du -sh "$OPD_JIT_CACHE_SEED" | cut -f1)"; \
+    else echo "WARN: JIT seed skipped/failed ($JIT_CACHE_URL) -> runtime compile fallback"; fi
+
 WORKDIR /opt/opd/repo/training/opd_v2
 # No ENTRYPOINT — launched per-role on a single node (one GPU each). Serve scripts baked at /opt/opd/opd_serve:
 #   teacher:      CUDA_VISIBLE_DEVICES=3 /opt/opd/opd_serve/run_teacher.sh --tp 1 --port 8100

@@ -54,6 +54,12 @@ if [ -n "${JIT_CACHE_DIR:-}" ]; then
     ln -sfn "$_jc/$_d" "$HOME/.cache/$_d"
   done
   mkdir -p "$_jc/inductor"
+  # Seed from the image's baked warm compile cache (deep_gemm/triton/flashinfer/tvm-ffi for sm_100, TP4;
+  # NO autotune — that's re-tuned per deployment). cp -n = never clobber a warmer/newer entry, so a persistent
+  # (Weka) cache is untouched and a FRESH one skips the ~10-20min cold DeepGEMM/JIT compile. Disable: JIT_CACHE_SEED=0.
+  _seed="${OPD_JIT_CACHE_SEED:-/opt/opd/jit-cache-seed}/sm${_ccap:-x}/teacher"
+  [ "${JIT_CACHE_SEED:-1}" != "0" ] && [ -d "$_seed" ] && { cp -rn "$_seed/." "$_jc/" 2>/dev/null || true; \
+    echo "[jit-cache] seeded compile cache from baked warm cache ($_seed)" >&2; }
   export DG_JIT_CACHE_DIR="$HOME/.cache/deep_gemm" TRITON_CACHE_DIR="$HOME/.cache/triton" \
          TVM_FFI_CACHE_DIR="$HOME/.cache/tvm-ffi" TORCHINDUCTOR_CACHE_DIR="$_jc/inductor"
   echo "[jit-cache] persistent compile cache (sm${_ccap:-x}/teacher) -> $_jc" >&2
