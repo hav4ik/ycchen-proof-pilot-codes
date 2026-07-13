@@ -8,10 +8,11 @@
 # REQUIRED cluster paths: STUDENT_PATH, DEEPSEEK_V4_FLASH, RUN_DIR (scratch/shared).
 
 # Producer = agentic (her production path). Problems + warm-start proofs come from the seed dataset
+# chankhavu/ycchen-dsflash-proof-distill-v2-test — a byte-faithful, user-owned mirror of Yi-Chia's
 # ycchen/dsflash-proof-distill-v2-test (public HF), built into the pool at runtime by opd_v2.agentic.seed
 # -> needs network on the node (or pre-seed once: python -m opd_v2.agentic.seed --run-dir $RUN_DIR).
 export PRODUCER="${PRODUCER:-agentic}"
-export SEED_SOURCE="${SEED_SOURCE:-ycchen/dsflash-proof-distill-v2-test}"   # the OPD prompt dataset
+export SEED_SOURCE="${SEED_SOURCE:-chankhavu/ycchen-dsflash-proof-distill-v2-test}"   # the OPD prompt dataset (user-owned mirror)
 export SEED_HF_CONFIG="${SEED_HF_CONFIG:-per_problem}"
 export ATTN_IMPL="${ATTN_IMPL:-olmo3_sink_fa2}"
 export STUDENT_PATH="${STUDENT_PATH:?set to the deploy-format student dir (e.g. chankhavu/yccchen-olmo3-deploy checkout)}"

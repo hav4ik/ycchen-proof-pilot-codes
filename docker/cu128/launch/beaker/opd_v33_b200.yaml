@@ -73,7 +73,11 @@ tasks:
       # WANDB_API_KEY is a BLOCKED literal name — source it from a Beaker secret instead:
       # - name: WANDB_API_KEY
       #   secret: "<PLACEHOLDER: wandb-api-key>"     # `beaker secret write wandb-api-key <key>`
-      # HF_TOKEN not required (SEED_SOURCE is public); add as a secret only if you gate the models:
+      # SEED_SOURCE defaults to chankhavu/ycchen-dsflash-proof-distill-v2-test (PUBLIC, user-owned mirror of
+      # ycchen/dsflash-proof-distill-v2-test) -> build_seed does a live load_dataset at startup, so the node
+      # needs network to HF (public = no token). To run fully offline, pre-build the pool once and mount it:
+      #   python -m opd_v2.agentic.seed --run-dir <RUN_DIR>   # writes <RUN_DIR>/pool/seed.jsonl (skipped if present)
+      # HF_TOKEN not required (SEED_SOURCE + models are public); add as a secret only if you gate the models:
       # - name: HF_TOKEN
       #   secret: "<PLACEHOLDER: hf-token>"
 

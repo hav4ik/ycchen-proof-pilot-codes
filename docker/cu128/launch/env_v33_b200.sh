@@ -7,7 +7,7 @@
 # from the legacy rope_scaling; sglang needs the legacy form) — so STUDENT_PATH may equal ROLLOUT_MODEL.
 
 export PRODUCER=agentic
-export SEED_SOURCE=${SEED_SOURCE:-ycchen/dsflash-proof-distill-v2-test}   # her OPD prompt dataset (public HF)
+export SEED_SOURCE=${SEED_SOURCE:-chankhavu/ycchen-dsflash-proof-distill-v2-test}   # OPD prompt dataset — byte-faithful, user-owned mirror of ycchen/dsflash-proof-distill-v2-test (public; deletion-proof for the ship run)
 export SEED_HF_CONFIG=${SEED_HF_CONFIG:-per_problem}
 export ATTN_IMPL=olmo3_sink_fa2          # cu128 delta #1: B200 has no FA3 -> post-correction sink on stock FA2
 # (cu128 delta #2 is the rollout attention backend = triton, already the default in run_rollout.sh)

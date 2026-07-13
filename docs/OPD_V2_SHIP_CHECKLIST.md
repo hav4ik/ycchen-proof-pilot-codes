@@ -61,6 +61,11 @@ before shipping, and prove no code/config commit is un-baked (§1).**
 - [ ] `BEAKER_NODE_HOSTNAME` peer-routability confirmed on the target cluster (the launcher's one unverified
       assumption — the health gate fails fast if wrong).
 - [ ] B200 MoE backend chosen: `MOE_BACKEND=auto` (or `flashinfer_mxfp4`) — `marlin` is Hopper-only.
+- [ ] **Seed source reachable at startup.** `SEED_SOURCE` now defaults to the user-owned public mirror
+      `chankhavu/ycchen-dsflash-proof-distill-v2-test` (byte-faithful copy of `ycchen/…`, deletion-proof).
+      `build_seed` does a live `load_dataset` at pool init, so the node needs HF network (public → no
+      `HF_TOKEN`). For an offline cluster, pre-build the pool once and mount it:
+      `python -m opd_v2.agentic.seed --run-dir <RUN_DIR>` → `<RUN_DIR>/pool/seed.jsonl` (skipped if present).
 
 ## §4 — Faithfulness (production == Yi-Chia's V33, exactly)
 
