@@ -3,14 +3,26 @@
 Beaker launcher for Yi-Chia Chen's **V33** OPD v2 run: **64x B200 = 8 nodes x 8 GPU**, packaged in
 `chankhavu/ycchen-opd:cu128`. This is the Slurm→Beaker port of the verified slurm launcher.
 
-> **DRAFT — not yet run.** Fill every `<PLACEHOLDER: ...>` in `opd_v33_b200.yaml`, confirm the
-> shared-FS + hostname assumptions below, then do a small smoke (see [Smoke first](#smoke-first))
-> before the full 8-node run.
+> **Status:** the specs are **pre-filled against the Ai2 Beaker docs** for **`ai2/titan-cirrascale`** (96× B200,
+> 192 GB) — cluster, NCCL (`ib`/`^=mlx5_bond_0`), `gpuCount`, `sharedMemory`, `timeout`, and the pinned image are
+> set. You fill **3 team-specific values** (budget, Weka bucket+`subPath`, priority). Run the 3-node smoke first,
+> then the 8-node run. **Full prerequisites → [OPD_V2_AI2_HANDOFF.md](../../../../docs/OPD_V2_AI2_HANDOFF.md).**
 
-| file | what |
-|---|---|
-| [`opd_v33_b200.yaml`](opd_v33_b200.yaml) | Beaker experiment spec (`version: v2`), `replicas: 8`. |
-| [`run_mn_beaker.sh`](../run_mn_beaker.sh) | the launcher each replica runs; role dispatch by `BEAKER_REPLICA_RANK`. |
+## Prerequisites (before submitting) — full detail in [OPD_V2_AI2_HANDOFF.md](../../../../docs/OPD_V2_AI2_HANDOFF.md)
+- **Models** (download to Weka, mount read-only): teacher `deepseek-ai/DeepSeek-V4-Flash` → `/models/DeepSeek-V4-Flash`
+  (~83 GB); student `chankhavu/yccchen-olmo3-deploy` → `/models/student-deploy` (~64 GB; one deploy checkpoint
+  serves BOTH trainer + rollout).
+- **Seed dataset**: auto-fetched at runtime into `<RUN_DIR>/pool/seed.jsonl` (public mirror
+  `chankhavu/ycchen-dsflash-proof-distill-v2-test`) — nothing to download on a networked node. For an offline
+  cluster, pre-build once: `python -m opd_v2.agentic.seed --run-dir <RUN_DIR>`.
+- **Storage**: a WRITABLE shared Weka bucket for **`RUN_DIR`** (the loop's single source of truth) + a **FIXED**
+  shared **`JIT_CACHE_DIR`** (persists the one-time ~10-20 min DeepGEMM + ~15 min fp4-autotune warm across runs).
+
+| file | what | topology |
+|---|---|---|
+| [`opd_v33_b200.yaml`](opd_v33_b200.yaml) | **production** — 8×B200, her V33 knobs, `replicas: 8` | 1+4+3 |
+| [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) | **launcher smoke** — 24×B200, 57k ctx, 20 steps, `replicas: 3` | 1+1+1 |
+| [`run_mn_beaker.sh`](../run_mn_beaker.sh) | the launcher each replica runs; role dispatch by `BEAKER_REPLICA_RANK`. | — |
 
 It is a **faithful** port of [`../run_mn_cu128.sh`](../run_mn_cu128.sh): identical role scripts,
 port scheme (`PORT_SHIFT`), health gate, launch order, `make_config`, `opd_v2.trainer.service`

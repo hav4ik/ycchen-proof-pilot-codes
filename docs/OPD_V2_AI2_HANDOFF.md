@@ -33,6 +33,28 @@ hf download chankhavu/yccchen-olmo3-deploy --local-dir /weka/<bucket>/models/stu
 ```
 The `hf` CLI is inside the image, so you can also run these from a throwaway container.
 
+### Seed dataset — auto-fetched at runtime (NO mount needed); pre-build only for offline
+The agentic pool is seeded from **`chankhavu/ycchen-dsflash-proof-distill-v2-test`** (PUBLIC). By default the
+orchestrator does a live `load_dataset(...)` at pool init → the **raw** dataset lands in the HF datasets cache
+(`~/.cache/huggingface`, transient) and is parsed into **`<RUN_DIR>/pool/seed.jsonl`** (on Weka, persists). It is
+**not** a `/models` mount, so on a networked node there is **nothing to pre-download** — it just works.
+
+**To run fully offline / avoid the one-time runtime fetch, pre-build the seed once** (the run then skips it,
+because it skips if `<RUN_DIR>/pool/seed.jsonl` exists non-empty):
+```bash
+SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
+  python -m opd_v2.agentic.seed --run-dir <RUN_DIR>      # inside the image, on a networked prep node
+# -> <RUN_DIR>/pool/seed.jsonl (1776 problems); the job reads it from the shared Weka RUN_DIR
+```
+
+### Prerequisites checklist (do these before submitting)
+- [ ] **Teacher** `deepseek-ai/DeepSeek-V4-Flash` downloaded to Weka, mounted at `/models/DeepSeek-V4-Flash`.
+- [ ] **Student** `chankhavu/yccchen-olmo3-deploy` downloaded to Weka, mounted at `/models/student-deploy`.
+- [ ] **`RUN_DIR`** and **`JIT_CACHE_DIR`** are WRITABLE shared Weka paths (JIT_CACHE_DIR fixed, not per-run).
+- [ ] Seed: nothing (auto-fetched at runtime) — OR pre-build `<RUN_DIR>/pool/seed.jsonl` for an offline cluster.
+- [ ] The 3 team-specific yaml values filled (budget, Weka bucket+subPath, priority) — see §3.
+- [ ] `WANDB_API_KEY` set as a Beaker secret (optional; W&B is online by default).
+
 ## 2 · Provide the three writable/shared paths
 
 | path (in-job) | must be | why |
