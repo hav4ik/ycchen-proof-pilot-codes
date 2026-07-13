@@ -164,10 +164,10 @@ class Olmo2Attention(nn.Module):
         # Olmo2/Olmo3 checkpoints are unaffected.
         self.sinks = None
         if getattr(config, "sink_init_value", None) is not None:
-            attn_backend = get_global_server_args().attention_backend
-            sinks_dtype = (
-                torch.float32 if attn_backend == "trtllm_mha" else torch.bfloat16
-            )
+            # FlashInfer's attention-sink JIT rejects non-FP32 sinks; Triton and
+            # trtllm_mha accept FP32 too, so use a backend-independent FP32 sink
+            # (was backend-conditional bf16/fp32 -> forced fp32 for the flashinfer path).
+            sinks_dtype = torch.float32
             self.sinks = nn.Parameter(
                 torch.empty(self.num_heads, dtype=sinks_dtype), requires_grad=False
             )
@@ -521,8 +521,10 @@ class Olmo2ForCausalLM(nn.Module):
             ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        loaded_sinks = 0
+        loaded_sink_names = set()
+        loaded_weight_names = set()
         for name, loaded_weight in weights:
+            loaded_weight_names.add(name)
             if "rotary_emb.inv_freq" in name:
                 continue
             # proof-pilot: per-head sink scalars, narrowed to this TP rank
@@ -533,7 +535,7 @@ class Olmo2ForCausalLM(nn.Module):
                 param.data.copy_(
                     loaded_weight[start : start + param.numel()].to(param.dtype)
                 )
-                loaded_sinks += 1
+                loaded_sink_names.add(name)
                 continue
             if "rotary_emb.cos_cached" in name or "rotary_emb.sin_cached" in name:
                 # Models trained using ColossalAI may include these tensors in
@@ -571,8 +573,79 @@ class Olmo2ForCausalLM(nn.Module):
                 param = params_dict[name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
-        if loaded_sinks:
-            logger.info(f"Olmo3Sink: loaded {loaded_sinks} attention-sink tensors")
+        self._last_loaded_attention_sink_names = loaded_sink_names
+        self._last_loaded_checkpoint_weight_names = loaded_weight_names
+        if loaded_sink_names:
+            logger.info(
+                "Olmo3Sink: loaded %d attention-sink tensors", len(loaded_sink_names)
+            )
+
+    def validate_loaded_attention_sinks(self) -> None:
+        """Fail fast if a sink model loaded without all its sink/norm weights.
+
+        Invoked by the model loader after load_weights (both the plain path and
+        the flash_rl reload path) so a silently-partial checkpoint can never
+        serve with uninitialised attention sinks.
+        """
+        expected = {
+            name
+            for name, _ in self.named_parameters()
+            if name.endswith(".self_attn.sinks")
+        }
+        if not expected:
+            return
+        loaded = getattr(self, "_last_loaded_attention_sink_names", set())
+        if loaded != expected:
+            missing = sorted(expected - loaded)
+            raise RuntimeError(
+                f"OLMo3 attention-sink tensors were not populated: missing={missing}"
+            )
+        expected_checkpoint = self.expected_checkpoint_weight_names()
+        loaded_checkpoint = getattr(
+            self, "_last_loaded_checkpoint_weight_names", set()
+        )
+        missing_checkpoint = sorted(expected_checkpoint - loaded_checkpoint)
+        if missing_checkpoint:
+            raise RuntimeError(
+                f"Incomplete OLMo3 checkpoint: missing={missing_checkpoint}"
+            )
+
+    def expected_checkpoint_weight_names(self) -> set[str]:
+        """Names required from a standard HF OLMo3 sink checkpoint."""
+        expected = {
+            "model.embed_tokens.weight",
+            "model.norm.weight",
+        }
+        if not self.config.tie_word_embeddings:
+            expected.add("lm_head.weight")
+        for layer in range(self.config.num_hidden_layers):
+            prefix = f"model.layers.{layer}"
+            expected.update(
+                {
+                    f"{prefix}.self_attn.q_proj.weight",
+                    f"{prefix}.self_attn.k_proj.weight",
+                    f"{prefix}.self_attn.v_proj.weight",
+                    f"{prefix}.self_attn.o_proj.weight",
+                    f"{prefix}.self_attn.q_norm.weight",
+                    f"{prefix}.self_attn.k_norm.weight",
+                    f"{prefix}.self_attn.sinks",
+                    f"{prefix}.mlp.gate_proj.weight",
+                    f"{prefix}.mlp.up_proj.weight",
+                    f"{prefix}.mlp.down_proj.weight",
+                    f"{prefix}.post_attention_layernorm.weight",
+                    f"{prefix}.post_feedforward_layernorm.weight",
+                }
+            )
+            if self.config.attention_bias:
+                expected.update(
+                    {
+                        f"{prefix}.self_attn.q_proj.bias",
+                        f"{prefix}.self_attn.k_proj.bias",
+                        f"{prefix}.self_attn.v_proj.bias",
+                        f"{prefix}.self_attn.o_proj.bias",
+                    }
+                )
+        return expected
 
 
 class Olmo3SinkForCausalLM(Olmo2ForCausalLM):

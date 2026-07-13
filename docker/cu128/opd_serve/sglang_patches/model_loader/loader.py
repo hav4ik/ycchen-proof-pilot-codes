@@ -777,6 +777,15 @@ class DefaultModelLoader(BaseModelLoader):
         else:
             model.load_weights(weights)
 
+        # flashinfer-sink: fail fast if a sink model loaded without all its sink
+        # weights (olmo2 Olmo3SinkForCausalLM exposes validate_loaded_attention_sinks;
+        # plain models don't and this is a no-op).
+        validate_loaded_sinks = getattr(
+            model, "validate_loaded_attention_sinks", None
+        )
+        if validate_loaded_sinks is not None:
+            validate_loaded_sinks()
+
         # Used in tests to verify memory savings when using online quantization.
         if is_cuda_alike():
             memory_end = get_available_gpu_memory(
@@ -987,6 +996,8 @@ class QuantizedRLModelLoader(DefaultModelLoader):
         model.load_weights = load_weights_proxy
 
         model.load_weights(weights)
+        # flashinfer-sink: verify sink tensors landed on the initial FP8 load.
+        QuantizedRLModelLoader._validate_attention_sink_load(model)
         original_weights = dict(model.named_parameters())
 
         # Record pre-quantization state (shape/stride) for torch.as_strided reset
@@ -1168,6 +1179,9 @@ class QuantizedRLModelLoader(DefaultModelLoader):
         logger.info("[QuantizedRL] Reload: Updating weights with FP8 quantization")
 
         weights_list = list(weights)
+        # flashinfer-sink: refuse a partial reload that would leave sink/norm
+        # weights stale (raises before any live storage is touched).
+        QuantizedRLModelLoader._validate_attention_sink_checkpoint(model, weights_list)
         updated_param_names, is_last_update = (
             QuantizedRLModelLoader._get_updated_params(weights_list, model)
         )
@@ -1256,6 +1270,8 @@ class QuantizedRLModelLoader(DefaultModelLoader):
 
         # Load quantized weights (weight_loader stacks FP8 shards)
         first_time_load_weights(quantize_weights_iterator(iter(weights_list)))
+        # flashinfer-sink: verify sink tensors were repopulated by this reload.
+        QuantizedRLModelLoader._validate_attention_sink_load(model)
 
         # Copy back to original FP8 memory locations and update scales
         all_params = dict(model.named_parameters())
@@ -1308,6 +1324,72 @@ class QuantizedRLModelLoader(DefaultModelLoader):
 
         logger.info("[QuantizedRL] Reload complete")
         return updated_param_names, is_last_update
+
+    # ------------------------------------------------------------------
+    # flashinfer-sink: attention-sink checkpoint validation (ported from
+    # hav4ik/sglang codex/flashinfer-attention-sink). Additive guards only —
+    # they do not alter the FP8 staging / as_strided reload semantics above.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _attention_sink_param_names(model) -> set[str]:
+        return {
+            name
+            for name, _ in model.named_parameters()
+            if name.endswith(".self_attn.sinks")
+        }
+
+    @staticmethod
+    def _validate_attention_sink_checkpoint(model, weights_list) -> None:
+        sink_names = QuantizedRLModelLoader._attention_sink_param_names(model)
+        if not sink_names:
+            return
+        required_suffixes = (
+            ".self_attn.sinks",
+            ".self_attn.q_norm.weight",
+            ".self_attn.k_norm.weight",
+            ".post_attention_layernorm.weight",
+            ".post_feedforward_layernorm.weight",
+            ".norm.weight",
+        )
+        expected = {
+            name
+            for name, _ in model.named_parameters()
+            if name.endswith(required_suffixes)
+        }
+        provided = {name for name, _ in weights_list if name in expected}
+        if provided != expected:
+            missing = sorted(expected - provided)
+            raise RuntimeError(
+                "Incomplete OLMo3 checkpoint for FlashRL reload; refusing a "
+                f"partial update of sink or normalization weights: missing={missing}"
+            )
+        expected_checkpoint_names = getattr(
+            model, "expected_checkpoint_weight_names", None
+        )
+        if expected_checkpoint_names is not None:
+            required = expected_checkpoint_names()
+            checkpoint_names = {name for name, _ in weights_list}
+            missing_checkpoint = sorted(required - checkpoint_names)
+            if missing_checkpoint:
+                raise RuntimeError(
+                    "Incomplete OLMo3 checkpoint for FlashRL reload: "
+                    f"missing={missing_checkpoint}"
+                )
+
+    @staticmethod
+    def _validate_attention_sink_load(model) -> None:
+        expected = QuantizedRLModelLoader._attention_sink_param_names(model)
+        if not expected:
+            return
+        loaded = getattr(model, "_last_loaded_attention_sink_names", set())
+        if loaded != expected:
+            missing = sorted(expected - loaded)
+            raise RuntimeError(
+                f"OLMo3 attention-sink tensors were not populated: missing={missing}"
+            )
+        logger.info(
+            "[QuantizedRL] Verified %d OLMo3 attention-sink tensors", len(loaded)
+        )
 
     @staticmethod
     def _get_updated_params(weights_list, model):

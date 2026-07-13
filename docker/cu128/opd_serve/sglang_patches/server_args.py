@@ -2300,6 +2300,7 @@ class ServerArgs:
 
             supported_backends = [
                 "triton",
+                "flashinfer",
                 "trtllm_mha",
                 "fa3",
                 "fa4",
@@ -2966,8 +2967,9 @@ class ServerArgs:
             elif is_mps():
                 return "torch_native"
             else:
-                # FlashInfer does not support attention sinks.
-                if is_flashinfer_available() and not model_config.has_attention_sinks:
+                # flashinfer-sink: FlashInfer's dedicated attention-sink JIT now
+                # supports sinks, so it is selectable for sink models too.
+                if is_flashinfer_available():
                     return "flashinfer"
                 return "triton"
         else:

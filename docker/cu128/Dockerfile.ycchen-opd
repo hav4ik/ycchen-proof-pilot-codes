@@ -147,18 +147,34 @@ RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
     uv pip install --python "${SERVE_VENV}/bin/python" --prerelease=allow "${SGLANG_SPEC}"; \
     "${SERVE_VENV}/bin/python" -c "import sglang; print('sglang', sglang.__version__)"
 
+# flashinfer-sink: bump the serve venv's flashinfer 0.6.12 -> 0.6.14 in lockstep with the
+# native attention-sink JIT overlay (layers/attention/flashinfer_backend.py imports
+# get_batch_prefill_attention_sink_uri / attention_sink_decl, added in 0.6.14). jit-cache
+# wheels are cuda-specific -> pull them from the cu130 index (this serve venv is cu130);
+# flashinfer-python / flashinfer-cubin come from PyPI. Pin all three to the same version.
+RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
+    uv pip install --python "${SERVE_VENV}/bin/python" --prerelease=allow \
+        --extra-index-url https://flashinfer.ai/whl/cu130/ \
+        "flashinfer-python==0.6.14" \
+        "flashinfer-cubin==0.6.14" \
+        "flashinfer-jit-cache==0.6.14"; \
+    "${SERVE_VENV}/bin/python" -c "import importlib.metadata as md; print('flashinfer-python', md.version('flashinfer-python'))"
+
 # CUDA-13 forward-compat libcuda for the (inherently CUDA-13) serve venv — see the cuda13compat stage
 # note at the top. Loaded conditionally by run_{teacher,rollout}.sh only on pre-CUDA-13 drivers.
 COPY --from=cuda13compat /usr/local/cuda/compat/ /opt/cuda13-compat/
 
 # Bake the whole serve harness (run_teacher.sh / run_rollout.sh / bake helper + the patched sglang sources).
 COPY docker/cu128/opd_serve /opt/opd/opd_serve
-# Rollout serve patches. Four file overlays (olmo2 sink model, flash_rl loader, load_config, server_args)
-# PLUS the hybrid-SWA KV-pool patch: run Yi-Chia's idempotent apply_swa_patch.py against the STOCK 0.5.14
-# model_config.py (it adds Olmo3SinkForCausalLM/Olmo2ForCausalLM to `hybrid_swa_archs` and extends
-# `get_hybrid_layer_ids` to read olmo `layer_types`). WITHOUT it, --swa-full-tokens-ratio is SILENTLY inert
-# for olmo3 -> KV is allocated full on all 32 layers -> the 140k long-context rollout OOMs. Anchors verified
-# present on 0.5.14; the patcher's asserts fail the build loudly if a future sglang layout moves them.
+# Rollout serve patches. Five file overlays (olmo2 sink model, flash_rl loader, load_config, server_args,
+# and the flashinfer attention-sink backend) PLUS a model_config overlay carrying the hybrid-SWA KV-pool
+# patch. The model_config overlay is stock 0.5.14 + the Olmo3 sink-detection hunk (_detect_attention_sinks);
+# Yi-Chia's idempotent apply_swa_patch.py then runs ON TOP of that overlay (a different function in the same
+# file) to add Olmo3SinkForCausalLM/Olmo2ForCausalLM to `hybrid_swa_archs` and extend `get_hybrid_layer_ids`
+# to read olmo `layer_types`. WITHOUT the SWA patch, --swa-full-tokens-ratio is SILENTLY inert for olmo3 ->
+# KV is allocated full on all 32 layers -> the 140k long-context rollout OOMs. Anchors verified present on
+# 0.5.14; the patcher's asserts fail the build loudly if a future sglang layout moves them. The flashinfer
+# overlay adds FlashInfer's dedicated attention-sink JIT path so --attention-backend flashinfer serves sinks.
 RUN set -eux; \
     chmod +x /opt/opd/opd_serve/*.sh; \
     SGL="$(${SERVE_VENV}/bin/python -c 'import sglang,os;print(os.path.dirname(sglang.__file__))')"; \
@@ -166,10 +182,9 @@ RUN set -eux; \
     cp /opt/opd/opd_serve/sglang_patches/model_loader/loader.py     "$SGL/srt/model_loader/loader.py"; \
     cp /opt/opd/opd_serve/sglang_patches/configs/load_config.py     "$SGL/srt/configs/load_config.py"; \
     cp /opt/opd/opd_serve/sglang_patches/server_args.py             "$SGL/srt/server_args.py"; \
-    cp "$SGL/srt/configs/model_config.py" /tmp/mc_stock.py; \
+    cp /opt/opd/opd_serve/sglang_patches/layers/attention/flashinfer_backend.py "$SGL/srt/layers/attention/flashinfer_backend.py"; \
     "${SERVE_VENV}/bin/python" "${OPD_REPO}/training/opd_v2/flash_rl/patches/apply_swa_patch.py" \
-        /tmp/mc_stock.py "$SGL/srt/configs/model_config.py"; \
-    rm -f /tmp/mc_stock.py; \
+        /opt/opd/opd_serve/sglang_patches/configs/model_config.py "$SGL/srt/configs/model_config.py"; \
     "${SERVE_VENV}/bin/python" - <<'PY'
 import inspect
 import sglang.srt.models.olmo2 as m
@@ -178,13 +193,30 @@ import sglang.srt.server_args                  # noqa: F401
 import sglang.srt.layers.radix_attention as r
 import sglang.srt.layers.attention.triton_backend as t
 import sglang.srt.configs.model_config as mc
+import sglang.srt.layers.attention.flashinfer_backend as fib
+from sglang.srt.model_loader.loader import QuantizedRLModelLoader
+from sglang.srt.utils.common import is_flashinfer_available
 assert hasattr(m, "Olmo3SinkForCausalLM"), "olmo2 sink model missing"
 assert "Olmo3SinkForCausalLM" in inspect.getsource(mc), "SWA hybrid-pool patch did not land"
+# flashinfer-sink: the 5 symbols run_rollout.sh --attention-backend flashinfer needs.
+# 4 are defined unconditionally; the flashinfer sink wrapper only materialises when
+# flashinfer is importable (needs a CUDA build), so guard that one on availability.
+assert hasattr(fib, "_run_flashinfer_paged_with_sinks"), "flashinfer paged-sink runner missing"
+assert hasattr(fib, "FlashInferAttnBackend"), "FlashInferAttnBackend missing"
+assert hasattr(m.Olmo3SinkForCausalLM, "validate_loaded_attention_sinks"), "olmo2 sink validation missing"
+assert hasattr(QuantizedRLModelLoader, "_validate_attention_sink_checkpoint"), "loader sink checkpoint validation missing"
+if is_flashinfer_available():
+    from flashinfer import BatchAttentionWithAttentionSinkWrapper  # noqa: F401
+    assert hasattr(fib, "SGLangBatchAttentionWithAttentionSinkWrapper"), "sglang sink wrapper missing"
+    _sink_wrapper = "flashinfer 0.6.14 sink wrapper present"
+else:
+    _sink_wrapper = "flashinfer sink-wrapper check SKIPPED (no CUDA at build)"
 tb_src = inspect.getsource(t)
 print("serve OK: Olmo3Sink model +",
       "radix sinks" if "sinks" in inspect.getsource(r) else "NO radix sinks",
       "+ triton extend/decode sink-lines", tb_src.count("sinks="),
-      "+ SWA hybrid-pool patched (Olmo3Sink in hybrid_swa_archs)")
+      "+ SWA hybrid-pool patched (Olmo3Sink in hybrid_swa_archs)",
+      "+ flashinfer sink symbols importable;", _sink_wrapper)
 PY
 
 # Teacher: generate + apply the DeepSeek-V4-Flash hidden-extract patches (re-anchored for 0.5.14 in
