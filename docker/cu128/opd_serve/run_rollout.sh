@@ -27,6 +27,28 @@ if [ -d /opt/cuda13-compat ]; then
     echo "[cuda13-compat] node driver CUDA ${_cc}.x < 13 -> forward-compat libcuda enabled" >&2
   fi
 fi
+
+# --- persistent JIT compile cache (opt-in) -----------------------------------------------------------
+# DeepGEMM/flashinfer/sglang/tvm-ffi JIT-compile kernels PER GEMM shape. Set JIT_CACHE_DIR to a durable
+# shared-FS path (e.g. a Beaker Weka mount) and the compile caches persist across runs + instances ->
+# warm start, no recompile. Unset -> default ~/.cache (behaviour unchanged). Arch-scoped (sm_90a H200 vs
+# sm_100 B200 never collide) + role-scoped (all rollout replicas share one cache -> compile once for the
+# fleet). Redirect via symlink so it works regardless of each lib's env-var support.
+if [ -n "${JIT_CACHE_DIR:-}" ]; then
+  _ccap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '. ') || true
+  _jc="${JIT_CACHE_DIR%/}/sm${_ccap:-x}/rollout"; mkdir -p "$HOME/.cache"
+  for _d in deep_gemm flashinfer sglang tvm-ffi triton; do
+    mkdir -p "$_jc/$_d"
+    if [ -e "$HOME/.cache/$_d" ] && [ ! -L "$HOME/.cache/$_d" ]; then
+      cp -an "$HOME/.cache/$_d/." "$_jc/$_d/" 2>/dev/null || true; rm -rf "$HOME/.cache/$_d"
+    fi
+    ln -sfn "$_jc/$_d" "$HOME/.cache/$_d"
+  done
+  mkdir -p "$_jc/inductor"
+  export DG_JIT_CACHE_DIR="$HOME/.cache/deep_gemm" TRITON_CACHE_DIR="$HOME/.cache/triton" \
+         TVM_FFI_CACHE_DIR="$HOME/.cache/tvm-ffi" TORCHINDUCTOR_CACHE_DIR="$_jc/inductor"
+  echo "[jit-cache] persistent compile cache (sm${_ccap:-x}/rollout) -> $_jc" >&2
+fi
 SERVE_PY="${SERVE_PY:-/opt/venv/serve/bin/python}"
 MODEL="${MODEL:?set MODEL=<student deploy dir>}"
 PORT=8200; TP="${TP:-1}"

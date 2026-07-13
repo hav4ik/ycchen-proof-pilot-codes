@@ -164,6 +164,28 @@ tail -f "$RUNS/opd_1node_smoke/orchestrator.log"    # per-step metrics
 
 ---
 
+## Finalization checklist (fresh instance, baked image)
+
+Run on a clean 8×H200 after `docker pull chankhavu/ycchen-opd:cu128` to certify the **baked** image (no
+hot-patching). In-container, cheapest→most-expensive:
+
+1. **Image integrity** — `docker image inspect chankhavu/ycchen-opd:cu128 --format '{{index .RepoDigests 0}}'`
+   matches `sha256:002c8c078393e87c102b3281882aad6ad93ad6949cbb0e963d590b6910fd5ad7`. In-container the
+   flash_rl loader shows 4 fix markers, and forward-compat lib + `curand.h` + `MEMFRAC:-0.70` are baked
+   (see the Step-1 verify block above).
+2. **Sink correctness** — `python /opt/opd/test_attention_sink.py --list` then `--group all`. Every
+   non-skipped target PASS; skips must show a hardware reason, not an error.
+3. **Full loop → step + checkpoint** — `single_round`, `-e CHECKPOINT_EVERY=5 -e MAX_STEPS=5 -e HF_EXPORT=1`
+   (needs ~500 GB free on `/runs` for one 32B ckpt). Green = `step=5` rc=0, `onpolicy/weight_version` ticks,
+   a ckpt lands in `<run>/checkpoints/step_000005/` (+`hf/`, `latest.json`). MEMFRAC 0.70 / WEIGHT_SYNC_EVERY=1
+   / W&B online are baked defaults now.
+4. **Checkpoint resume** — relaunch the same `RUN_DIR` with `-e RESUME=1 -e MAX_STEPS=10`: trainer DCP-loads
+   `latest.json`, health reports `step=5` (not 0), continues 6→10 with continuous loss.
+
+All four green ⇒ **container finalized** — sink + loop + weight-sync + checkpoint + resume validated on the
+baked image. Only the B200 sm_100 hardware pass remains (needs a B200; `MOE_BACKEND=auto` picks the
+Blackwell teacher backend).
+
 ## Config: this shakeout vs. her V33 production
 
 | knob | shakeout | her V33 (B200) | why smaller here |

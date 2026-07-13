@@ -1,0 +1,108 @@
+# OPD v2 — her V33 production run on 64x B200 (8 nodes x 8 GPU) as a Beaker replicated batch job.
+# =============================== DRAFT — human review required ================================
+# Fill EVERY "<PLACEHOLDER: ...>" before submitting (they are quoted so the file stays valid YAML;
+# replace the whole quoted string). See ./README.md for the checklist + role table.
+# Submit:  beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
+# ==============================================================================================
+#
+# Topology (env_v33_b200.sh): 8 replicas, one per node. run_mn_beaker.sh assigns each node's role
+# from BEAKER_REPLICA_RANK:  rank 0 = teacher (TP4x2) | ranks 1-4 = rollout (TP4x2 fp8) |
+# ranks 5-7 = trainer (FSDP2 world 24); rank 5 (first trainer) also runs the orchestrator.
+#
+# CRITICAL — the shared run dir: RUN_DIR is the single source of truth shared by ALL 8 replicas
+# (config.json, trainer_endpoint.json, the teacher hidden-state spool index, the weight-sync buffer,
+# rolling weights, DCP checkpoints, the agentic pool, the rank->hostname gather, all logs). It MUST
+# be a WRITABLE filesystem visible at the SAME path on every replica (Weka). NOTE: the Beaker docs
+# say DataMounts are "read-only", but WEKA experiment mounts are read-write in practice at Ai2 (that
+# is how training checkpoints are written) — CONFIRM the run-dir mount is writable on the target
+# cluster before launch; the whole loop coordinates through it.
+
+version: v2
+budget: "<PLACEHOLDER: ai2/your-budget>"            # e.g. ai2/oe-training
+description: "OPD v2 V33 on-policy distillation (OPD-32B) on 64x B200, 8 replicas"
+retry:
+  allowedTaskRetries: 2                             # ride out transient GPU/node failures (more likely at 64 GPU)
+
+tasks:
+  - name: opd-v33-b200
+    # ---- replicated multi-node primitives (confirmed against beaker-docs distributed-training) ----
+    replicas: 8                                     # 1 teacher + 4 rollout + 3 trainer = 8 nodes
+    leaderSelection: true                           # injects BEAKER_LEADER_REPLICA_HOSTNAME (needs replicas>=2 + hostNetworking)
+    hostNetworking: true                            # replicas reach each other by hostname; required for IB/NCCL
+    propagateFailure: true                          # if any replica fails, cancel the rest
+    propagatePreemption: true                       # if any replica is preempted, preempt the rest
+    synchronizedStartTimeout: 30m                   # wait for all 8 replicas to be ready before the command runs
+
+    image:
+      docker: chankhavu/ycchen-opd:cu128            # verified image (8xH200). Or import into Beaker and use:
+      # beaker: "<PLACEHOLDER: ai2/ycchen-opd-cu128>"  # (a Beaker image pulls faster than Docker Hub)
+
+    # env_v33_b200.sh sets her V33 topology/knobs; run_mn_beaker.sh does node-discovery + placement.
+    command: ["bash", "-lc", "source /opt/opd/launch/env_v33_b200.sh && bash /opt/opd/launch/run_mn_beaker.sh"]
+
+    envVars:
+      # ---- required cluster paths (env_v33_b200.sh does NOT set these) ----
+      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below
+        value: "<PLACEHOLDER: /weka/run/opd_v33_b200>"
+      - name: DEEPSEEK_V4_FLASH                     # teacher checkpoint dir (read)
+        value: "<PLACEHOLDER: /models/DeepSeek-V4-Flash>"
+      - name: STUDENT_PATH                          # deploy-format student dir (read); works for trainer+rollout
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: ROLLOUT_MODEL                         # = STUDENT_PATH (same deploy dir)
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: STUDENT_DEPLOY_PATH                   # deploy dir used by weight-sync saves — see README (may need WRITABLE)
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: JIT_CACHE_DIR                         # persistent compile cache -> skips the ~8-min/shape cold DeepGEMM warm
+        value: "<PLACEHOLDER: /weka/run/jit_cache>" # a FIXED shared path (NOT under the per-run RUN_DIR) on the same Weka
+                                                    # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
+                                                    # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
+
+      # ---- B200 NCCL fabric (per beaker-docs distributed-training; confirm for the target cluster) ----
+      - name: NCCL_SOCKET_IFNAME
+        value: "<PLACEHOLDER: ib>"                  # e.g. "ib" on ai2 IB clusters; "bond0" on ethernet clusters
+      - name: NCCL_IB_HCA
+        value: "<PLACEHOLDER: ^=mlx5_bond_0>"       # e.g. "^=mlx5_bond_0" on ai2 IB clusters
+
+      # ---- optional overrides (uncomment as needed) ----
+      # - name: MOE_BACKEND                          # marlin is Hopper-only; pin a Blackwell backend for B200
+      #   value: "flashinfer_mxfp4"                  #   (validated for DSv4-Flash TP4 on GB200, sglang #23743)
+      # - name: MAX_STEPS
+      #   value: "100000"
+      # - name: WANDB_MODE
+      #   value: "online"
+      # WANDB_API_KEY is a BLOCKED literal name — source it from a Beaker secret instead:
+      # - name: WANDB_API_KEY
+      #   secret: "<PLACEHOLDER: wandb-api-key>"     # `beaker secret write wandb-api-key <key>`
+      # HF_TOKEN not required (SEED_SOURCE is public); add as a secret only if you gate the models:
+      # - name: HF_TOKEN
+      #   secret: "<PLACEHOLDER: hf-token>"
+
+    datasets:
+      # WRITABLE shared run dir (holds config/endpoint/spool/weights/checkpoints/gather/logs). CRITICAL.
+      - mountPath: /weka/run
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"   # e.g. oe-training-default
+        subPath: "<PLACEHOLDER: opd/run>"           # a per-run writable prefix in the bucket
+      # teacher weights (DeepSeek-V4-Flash) — mountPath must not overlap the others
+      - mountPath: /models/DeepSeek-V4-Flash
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"
+      # student deploy-format weights (trainer + rollout)
+      - mountPath: /models/student-deploy
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
+
+    resources:
+      gpuCount: 8                                   # whole 8-GPU B200 node per replica
+      sharedMemory: "<PLACEHOLDER: 128GiB>"         # teacher hidden spool lives in /dev/shm (default 5GiB is too small)
+
+    context:
+      priority: "<PLACEHOLDER: high>"               # low | normal | high | urgent
+
+    constraints:
+      cluster:
+        - "<PLACEHOLDER: ai2/your-b200-cluster>"    # the B200 cluster name
+
+    timeout: "<PLACEHOLDER: 48h>"                   # max job lifespan (cluster may cap this)
