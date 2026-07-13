@@ -30,13 +30,20 @@ export MOE_BACKEND="${MOE_BACKEND:-marlin}"    # Hopper/H200: marlin OK. B200: p
 export REFINE_BUNDLE_CAP="${REFINE_BUNDLE_CAP:-8000}" SELECT_BUNDLE_CAP="${SELECT_BUNDLE_CAP:-8000}"
 export CONTEXT_LEN="${CONTEXT_LEN:-57344}" MAX_TRAJ_TOKENS="${MAX_TRAJ_TOKENS:-57344}" MICRO="${MICRO:-57344}"
 export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-49152}"
-export KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8_e4m3}" SWA_RATIO="${SWA_RATIO:-0.2}" MEMFRAC="${MEMFRAC:-0.85}"
+# MEMFRAC 0.70 on H200 (140GB), NOT her 0.82 (B200, 180GB): the fp8 weight-sync reload peak is ~18-26GB
+# (old fp8 copy + loader clone + bf16 re-quant — see run_agentic_mn_32b.sbatch:73). fp8 weights (~16GB) sit
+# ON TOP of the static KV pool, so at 0.85 the rollout hit 135/140GB (~5GB free) and OOM'd the reload at the
+# first weight-sync. 0.70 leaves ~25GB — matches her B200 headroom scaled to H200's smaller VRAM.
+export KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8_e4m3}" SWA_RATIO="${SWA_RATIO:-0.2}" MEMFRAC="${MEMFRAC:-0.70}"
 export TEACHER_CONTEXT_LEN="${TEACHER_CONTEXT_LEN:-61440}" TEACHER_MEMFRAC="${TEACHER_MEMFRAC:-0.78}" TEACHER_MAXRUN="${TEACHER_MAXRUN:-8}"
 export ROLLOUT_N="${ROLLOUT_N:-2}"                 # samples per produce_sample task
 export ROLLOUT_MAXRUN="${ROLLOUT_MAXRUN:-4}" TARGET_INFLIGHT="${TARGET_INFLIGHT:-8}"
 export ROLLOUT_GEN_TIMEOUT="${ROLLOUT_GEN_TIMEOUT:-3000}" STARVE_TIMEOUT="${STARVE_TIMEOUT:-3600}" DROP_FINISH_REASONS="${DROP_FINISH_REASONS-length}"
 export CHUNK_SIZE="${CHUNK_SIZE:-2048}" CPU_OFFLOAD="${CPU_OFFLOAD:-1}" TRAIN_BATCH_TRAJS="${TRAIN_BATCH_TRAJS:-4}"
-export BETA="${BETA:-1.0}" LR="${LR:-1e-5}" WEIGHT_SYNC_EVERY="${WEIGHT_SYNC_EVERY:-4}" G4_EVERY="${G4_EVERY:-5}" LOG_EVERY="${LOG_EVERY:-1}"
+# WEIGHT_SYNC_EVERY=1 for the smoke (prod = 4): a plumbing test should exercise the trainer->rollout weight
+# transfer at step 1, not hide it until step 4. Every step reloads student weights into the rollout (fp8
+# re-quant) — the most memory-intensive edge, so we want it validated immediately + on every step.
+export BETA="${BETA:-1.0}" LR="${LR:-1e-5}" WEIGHT_SYNC_EVERY="${WEIGHT_SYNC_EVERY:-1}" G4_EVERY="${G4_EVERY:-5}" LOG_EVERY="${LOG_EVERY:-1}"
 # CHECKPOINT_EVERY=0 -> skip the durable DCP resume ckpt (a 32B ckpt = ~475GB of fp32 optim+master;
 # not needed for a 20-step shakeout). Weight-sync still exercises the rolling weights buffer (~128GB).
 # Set CHECKPOINT_EVERY=10 (+ ensure ~500GB-1TB free) to also validate the checkpoint-save path.

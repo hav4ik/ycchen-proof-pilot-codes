@@ -192,6 +192,7 @@ context floor fit 8 GPUs.)
 | FSDP mesh balks at world 2 | try `-e TRAINER_NPROC=4` (needs 4 trainer GPUs → drop teacher to `-e TEACHER_TP=2` only if DeepSeek fits, else keep world 2) |
 | teacher never healthy | check `teacher.log`; DeepSeek MoE needs 4 GPUs + JIT warmup; raise `-e HEALTH_TIMEOUT=3600` |
 | rollout OOM at 57k | `-e MEMFRAC=0.80 -e ROLLOUT_MAXRUN=2` or lower `CONTEXT_LEN` |
+| rollout OOM **at weight-sync** (`update_weights_from_disk` → `.clone()` OOM, then a `per_token_group_quant_8bit` CPU `NotImplementedError` in the teardown) | `MEMFRAC` too high for the **fp8 reload peak** (~18-26GB: old fp8 copy + loader clone + bf16 re-quant). On H200 (140GB) use `-e MEMFRAC=0.70` (her 0.82 is for a 180GB B200); drop to `0.65` if it recurs. The CPU `NotImplementedError` is a *symptom* of the OOM (weights fall back to CPU; the fp8 kernel is CUDA-only), not a separate bug — fixing the OOM clears both. |
 | agentic won't start (`min_gen_room`) | ctx floor is `48000 + max(bundle caps)`; keep `MAX_TRAJ_TOKENS ≥ 56k` (or drop the caps further) |
 | no network for the seed | pre-seed on a connected box: `python -m opd_v2.agentic.seed --run-dir $RUN`, or use `-e PRODUCER=single_round` (in-repo problems) |
 | download gated / 401 | accept the DeepSeek license on HF, pass `-e HF_TOKEN=hf_…` to the download container |
