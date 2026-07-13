@@ -959,6 +959,20 @@ class QuantizedRLModelLoader(DefaultModelLoader):
         """
         logger.info("[QuantizedRL] Initial load with FP8 quantization")
 
+        # proof-pilot patch (ported from training/opd_v2/flash_rl/patches/loader.py):
+        # on reload (update_weights_from_disk re-enters this method) model.load_weights
+        # is ALREADY the reload proxy installed during the initial load. Re-wrapping it
+        # nests a NEW proxy whose captured original_load_weights is the PREVIOUS proxy ->
+        # the Nth reload recurses N levels deep, each re-materialising (list(weights)) and
+        # re-quantizing every weight. That linear blowup is what OOMs after a few reloads.
+        # On reload just invoke the single existing proxy (its original_load_weights is the
+        # REAL load_weights, so rebinding bottoms out with no recursion) and return -- this
+        # also skips the trailing initial-load-only record + process_weights_after_loading,
+        # which would otherwise re-quantize a non-contiguous view and trip is_contiguous().
+        if getattr(model, "flash_rl_initial_load_complete", False):
+            model.load_weights(weights)
+            return
+
         original_load_weights = model.load_weights
 
         def load_weights_proxy(weights):
