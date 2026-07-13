@@ -13,10 +13,11 @@ finish H200 agentic acceptance, then the B200 hardware pass via the Beaker 3-nod
 
 ## 1 · IMAGE BUILD
 
-| tag | digest | contents | for |
-|---|---|---|---|
-| `chankhavu/ycchen-opd:cu128` | `sha256:5e3ba5f6…` | fixes #1–#10 + `JIT_CACHE_DIR` | **PRODUCTION** — but **missing `faf4c62`** (see drift below) |
-| `chankhavu/ycchen-opd:cu128-flashinfer-sink` | `sha256:30994b4d…` | + flashinfer sink (0.6.14) | evaluation only — NOT production |
+| tag | digest | built at | contents | for |
+|---|---|---|---|---|
+| `chankhavu/ycchen-opd:cu128` | **`sha256:451201a8…`** | `94efb6c` | fixes #1–#10 + `JIT_CACHE_DIR` + `faf4c62` (agentic auto-scale) + seed mirror | **PRODUCTION / SHIP** — no drift (`94efb6c..HEAD` empty) |
+| `chankhavu/ycchen-opd:cu128` (old) | `sha256:5e3ba5f6…` | `74c1dac` | missing `faf4c62` | superseded — do NOT ship |
+| `chankhavu/ycchen-opd:cu128-flashinfer-sink` | `sha256:30994b4d…` | `321aff6` | + flashinfer sink (0.6.14) | evaluation only — NOT production |
 
 - **Build:** `DOCKER_BUILDKIT=1 docker build -f docker/cu128/Dockerfile.ycchen-opd -t chankhavu/ycchen-opd:cu128 .`
   from repo root. Base `chankhavu/olmo3-olmocore:cu128-fa2-sink`. **Two venvs:** trainer/base = genuine cu128
@@ -24,10 +25,11 @@ finish H200 agentic acceptance, then the B200 hardware pass via the Beaker 3-nod
   forward-compat on <13 drivers. FA2 wheel in `docker/cu128/wheels/` (gitignored — copy into fresh worktrees).
 - **Disk:** builds fill `/var/lib/docker`; if ENOSPC, `docker builder prune -af` (freed 104 GB once). ~15–30 min
   per build (cold cache); uv cache mount speeds sglang.
-- **⚠️ IMAGE↔SOURCE DRIFT (the bug that bit us):** a pushed image lags the source. `5e3ba5f6` was built at
-  `74c1dac`; `faf4c62` (agentic `AGENTIC_MAX_PROMPT_TOKENS` auto-scale) landed AFTER → not baked → scaled-smoke
-  agentic tripped `max_prompt_tokens=100000 > max_traj=57344`. **Rule: rebuild the ship image from HEAD as the
-  last step; `git log <build>..HEAD -- docker/ training/ *.sh *.py` must be EMPTY.** Full gate: `OPD_V2_SHIP_CHECKLIST.md`.
+- **⚠️ IMAGE↔SOURCE DRIFT (the bug that bit us — now RESOLVED):** a pushed image lags the source. `5e3ba5f6` was
+  built at `74c1dac`; `faf4c62` (agentic `AGENTIC_MAX_PROMPT_TOKENS` auto-scale) landed AFTER → not baked →
+  scaled-smoke agentic tripped `max_prompt_tokens=100000 > max_traj=57344`. **Rule: rebuild the ship image from
+  HEAD as the last step; `git log <build>..HEAD -- docker/ training/ *.sh *.py` must be EMPTY.** ✅ Done: the ship
+  image `451201a8` was rebuilt from `94efb6c` and the drift check is empty. Full gate: `OPD_V2_SHIP_CHECKLIST.md`.
 - **`JIT_CACHE_DIR`** (opt-in, baked in `run_{teacher,rollout,teacher_olmo3}.sh`): set it to a persistent path →
   symlinks `~/.cache/{deep_gemm,flashinfer,sglang,tvm-ffi}` there (arch+role scoped) so DeepGEMM compile cache
   survives runs/instances (kills the ~10–20 min teacher cold-warm). No-op when unset.
@@ -55,8 +57,9 @@ Operational gotchas (also in the bring-up doc):
   Small prefills are launch-bound (forward-compat × many MoE launches × eager); **long trajectories** make it
   compute-bound (11264 chunks → 20–40k tok/s). `--disable-cuda-graph` on the teacher is HERS (prefill-only).
 - **agentic `max_prompt_tokens > max_traj` guard:** config default 100000 is sized for her 130k prod ctx; the
-  scaled smoke (57344) needs `AGENTIC_MAX_PROMPT_TOKENS ≤ max_traj` (env_1node_smoke.sh auto-scales to MAX_TRAJ/2,
-  = 28672 — but that fix `faf4c62` isn't in `5e3ba5f6`; pass it manually until rebuilt).
+  scaled smoke (57344) needs `AGENTIC_MAX_PROMPT_TOKENS ≤ max_traj` — `env_1node_smoke.sh` auto-scales to
+  MAX_TRAJ/2 (= 28672) via `faf4c62`, **now baked in the ship image `451201a8`** (no manual override needed;
+  the old `5e3ba5f6` required passing it by hand).
 - `Scale param shape … not divisible by 3` weight-sync warning is BENIGN (her code, GQA q/k/v asymmetry).
 
 **Loop status:** validated on H200 — rollout(fp8/triton-sink/cuda-graph/SWA/fp8-KV) → teacher `/score`

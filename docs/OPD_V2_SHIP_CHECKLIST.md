@@ -19,6 +19,10 @@ though they're on GitHub. Concretely:
 **Rule (non-negotiable): rebuild the ship image from the current `opd/b200-cu128` HEAD as the LAST step
 before shipping, and prove no code/config commit is un-baked (§1).**
 
+> ✅ **RESOLVED (2026-07-13):** the ship image was rebuilt from `94efb6c` → **`sha256:451201a8…`**, baking
+> `faf4c62` (+ the seed mirror). Drift check `git log 94efb6c..HEAD -- docker/ training/ '*.sh' '*.py'` is
+> **empty**, and both fixes were spot-checked *inside the container*. `451201a8` is the image that ships.
+
 ## §1 — Image is complete (no drift)
 
 - [ ] **Rebuild from HEAD**, don't ship a stale tag:
@@ -106,8 +110,9 @@ before shipping, and prove no code/config commit is un-baked (§1).**
 
 | image | built at | functional commits missing | mitigation |
 |---|---|---|---|
-| `cu128 @ 5e3ba5f6` | `74c1dac` | `faf4c62` (agentic auto-scale) | rebuild from HEAD before ship, OR pass `AGENTIC_MAX_PROMPT_TOKENS=28672` in the scaled smoke |
-| `cu128-flashinfer-sink @ 30994b4d` | `321aff6` | `faf4c62` | not shipped to Ai2 (triton is production); same override if agentic-smoked on it |
+| **`cu128 @ 451201a8`** (SHIP) | **`94efb6c`** | **none** — drift-clean | none needed; this is the image for Ai2 |
+| `cu128 @ 5e3ba5f6` (superseded) | `74c1dac` | `faf4c62` (agentic auto-scale) | replaced by `451201a8`; do NOT ship |
+| `cu128-flashinfer-sink @ 30994b4d` | `321aff6` | `faf4c62` + seed mirror | not shipped to Ai2 (triton is production); rebuild that branch if ever needed |
 
 > **Ship rule of thumb:** the number that goes to Ai2 is the digest of an image built from a commit where
 > `git log <that-commit>..HEAD -- docker/ training/ *.sh *.py` is **empty**. If it's not empty, rebuild.
