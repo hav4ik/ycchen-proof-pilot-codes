@@ -9,8 +9,8 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
 - **Node:** rented 8×H200, NVIDIA driver **570.195.03 → max CUDA 12.8** (the same ceiling as the Ai2/Beaker
   target). GPUs run *inside* the image container (no host `docker run` wrapper).
 - **Image:** `chankhavu/ycchen-opd:cu128` — base/**trainer** venv is genuine cu128 (torch 2.10); the
-  **serve** venv (sglang) is cu130 (see fix #1). Current digest after these fixes:
-  `sha256:a3d7c1802598d6699920d2f9910703be0e19d09dc4bd80335f4fc21a55dd8d73`.
+  **serve** venv (sglang) is cu130 (see fix #1). Current digest after **fixes #1–#10** (31.7 GB):
+  `sha256:002c8c078393e87c102b3281882aad6ad93ad6949cbb0e963d590b6910fd5ad7`.
 
 ## Fix #1 — serve stack is CUDA-13; driver 570 is CUDA-12.8 → forward-compat
 

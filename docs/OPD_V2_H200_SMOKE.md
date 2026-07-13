@@ -40,7 +40,7 @@ gaps, no config fixes them. (The `docker run … nvidia-smi` also doubles as you
 
 ```bash
 docker pull chankhavu/ycchen-opd:cu128
-# current digest: sha256:5c36d05b045426c6356cc7925f9fe4a556d1011a3877660b953c11bdd893773c
+# current digest: sha256:002c8c078393e87c102b3281882aad6ad93ad6949cbb0e963d590b6910fd5ad7
 docker image inspect chankhavu/ycchen-opd:cu128 --format '{{index .RepoDigests 0}}'   # must match ^
 # air-gapped node instead? on the dev box:  docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
 ```
