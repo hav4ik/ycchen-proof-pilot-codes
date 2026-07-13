@@ -30,6 +30,15 @@ importable (it is a flat module, not a package):
 cd docker/cu128/tests/flashinfer_sink
 SERVE_PY=/opt/venv/serve/bin/python
 
+# REQUIRED on a pre-CUDA-13 driver (e.g. H200/570): the cu130 serve venv needs the forward-compat
+# libcuda + CUDA-13 toolkit loaded to see the GPU (run_{rollout,teacher}.sh do this at launch; a
+# standalone test must set it too). WITHOUT it, torch rolls back to CPU ("Triton is not supported on
+# current platform, roll back to CPU") -> flashinfer reports unavailable -> the CUDA-guarded sink
+# wrapper class SGLangBatchAttentionWithAttentionSinkWrapper is never defined -> ImportError at collect.
+# On a native CUDA-13 driver (B200) this is a harmless no-op.
+export LD_LIBRARY_PATH=/opt/cuda13-compat:${LD_LIBRARY_PATH:-}
+export CUDA_HOME=/usr/local/cuda-13.0 CUDA_PATH=/usr/local/cuda-13.0 PATH=/usr/local/cuda-13.0/bin:$PATH
+
 # Core numerical validation: FlashInfer sink kernel vs Triton vs eager reference
 # (prefill / extend / decode, bf16 + fp8 KV, sliding-window and full attention).
 "$SERVE_PY" -m pytest -q test_flashinfer_attention_sink.py
