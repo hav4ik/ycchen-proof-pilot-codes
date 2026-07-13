@@ -29,6 +29,12 @@ export MOE_BACKEND="${MOE_BACKEND:-marlin}"    # Hopper/H200: marlin OK. B200: p
 # Reduced refine/select bundle caps (her prod 40k/50k) pull the floor down to ~56k so it fits 8 GPUs.
 export REFINE_BUNDLE_CAP="${REFINE_BUNDLE_CAP:-8000}" SELECT_BUNDLE_CAP="${SELECT_BUNDLE_CAP:-8000}"
 export CONTEXT_LEN="${CONTEXT_LEN:-57344}" MAX_TRAJ_TOKENS="${MAX_TRAJ_TOKENS:-57344}" MICRO="${MICRO:-57344}"
+# agentic render-prompt cap MUST be <= MAX_TRAJ_TOKENS (orchestrator guard, else a prompt leaves budget<=0
+# for generation and is silently dropped). config.py's default (100000) is sized for her 130k-ctx prod
+# max_traj; at this scaled smoke max_traj it would trip the guard -> scale to half of MAX_TRAJ (permissive:
+# well above the ~8k-bundle render prompt, so nothing legit is dropped). Her env_v33 leaves it at 100000
+# (100000 < 130816, fine) -- this default only applies to the smaller smoke.
+export AGENTIC_MAX_PROMPT_TOKENS="${AGENTIC_MAX_PROMPT_TOKENS:-$(( MAX_TRAJ_TOKENS / 2 ))}"
 export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-49152}"
 # MEMFRAC 0.70 on H200 (140GB), NOT her 0.82 (B200, 180GB): the fp8 weight-sync reload peak is ~18-26GB
 # (old fp8 copy + loader clone + bf16 re-quant — see run_agentic_mn_32b.sbatch:73). fp8 weights (~16GB) sit
