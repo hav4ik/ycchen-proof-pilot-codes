@@ -64,7 +64,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 | path (in-job) | must be | why |
 |---|---|---|
 | `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
-| **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. |
+| **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
 | **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. |
 
 **About the JIT cache (your "writable/saveable cache dir"):** the DeepSeek-V4 teacher JIT-compiles fp8/fp4
@@ -111,6 +111,10 @@ beaker experiment create docker/cu128/launch/beaker/opd_smoke3_b200.yaml
 # (b) full 64x B200 V33 — her production config
 beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
 ```
+The smoke (`RUN_DIR=/weka/run/opd_smoke3_b200`) and the full run (`RUN_DIR=/weka/run/opd_v33_b200`) write to
+**separate** run dirs — keep them distinct so the smoke's scaled-down config/pool never touches production.
+They **do** share one dir on purpose: `JIT_CACHE_DIR` (`/weka/run/jit_cache`), so the smoke warms the fp4/DeepGEMM
+kernels that the full run then reuses.
 
 ---
 

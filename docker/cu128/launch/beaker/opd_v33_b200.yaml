@@ -45,8 +45,12 @@ tasks:
 
     envVars:
       # ---- required cluster paths (env_v33_b200.sh does NOT set these) ----
-      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below
-        value: "<PLACEHOLDER: /weka/run/opd_v33_b200>"
+      # RUN_DIR = this run's PRIVATE state dir. Keep it DISTINCT from the smoke's RUN_DIR in
+      # opd_smoke3_b200.yaml (default /weka/run/opd_smoke3_b200) so the smoke's scaled-down config.json +
+      # short-context pool never mix with the production run. (JIT_CACHE_DIR below is intentionally the
+      # SAME across both — the shared, persistent compile cache the smoke pre-warms for this run.)
+      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below; production-only path
+        value: "<PLACEHOLDER: /weka/run/opd_v33_b200>"      # <- keep DIFFERENT from the smoke RUN_DIR
       - name: DEEPSEEK_V4_FLASH                     # teacher checkpoint dir (read)
         value: "<PLACEHOLDER: /models/DeepSeek-V4-Flash>"
       - name: STUDENT_PATH                          # deploy-format student dir (read); works for trainer+rollout

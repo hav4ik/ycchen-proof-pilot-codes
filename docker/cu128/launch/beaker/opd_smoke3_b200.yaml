@@ -32,19 +32,34 @@ tasks:
       docker: chankhavu/ycchen-opd:cu128@sha256:4c0d4276dc45fe21877dc0d6d028887f4c8a6d91ae91e102eb90c262b3726222
       # ^ same pinned SHIP digest as the full run (teacher auto-detects flashinfer_mxfp4 on B200). UPDATE on rebuild.
 
-    # env_v33_b200.sh sets her V33 knobs; the inline overrides scale it to a 3-node/20-step smoke.
+    # env_v33_b200.sh sets her FULL V33 production knobs; sourcing it first means EVERY knob starts at
+    # production scale, then the inline overrides below scale it DOWN to a cheap 3-node/20-step smoke.
+    # The overrides fall in three groups (all smaller than her V33 values):
+    #   topology   : TEACHER_NNODES/ROLLOUT_NNODES=1     (1+1+1 = 3 nodes, vs her 1+4+3 = 8)
+    #   per-traj   : CONTEXT_LEN/MAX_TRAJ_TOKENS/MICRO 57344 (vs 130816/131072), MAX_NEW_TOKENS 49152 (vs 128000),
+    #                REFINE/SELECT_BUNDLE_CAP 8000 (keeps max_traj >= bundle_cap+min_gen_room(48000) guard happy)
+    #   VOLUME/cost: ROLLOUT_N=1 (vs default 4 -> 4x fewer trajectories/request), TARGET_INFLIGHT=32 (vs 512),
+    #                ROLLOUT_MAXRUN=16 (vs 64 -> faster cuda-graph warmup, matched to 2 replicas x 16 = 32 in-flight),
+    #                TEACHER_MAXRUN=8 (vs 16), TRAIN_BATCH_TRAJS=8 (vs 64), MAX_STEPS=20 (vs 100000), CHECKPOINT_EVERY=0 (off)
+    # WEIGHT_SYNC_EVERY=1 (vs 4) is deliberately MORE frequent so the weight-sync path is exercised every step.
     command: ["bash", "-lc",
       "source /opt/opd/launch/env_v33_b200.sh && \
        TEACHER_NNODES=1 ROLLOUT_NNODES=1 \
        CONTEXT_LEN=57344 MAX_TRAJ_TOKENS=57344 MICRO=57344 MAX_NEW_TOKENS=49152 \
        REFINE_BUNDLE_CAP=8000 SELECT_BUNDLE_CAP=8000 \
+       ROLLOUT_N=1 TARGET_INFLIGHT=32 ROLLOUT_MAXRUN=16 TEACHER_MAXRUN=8 \
        TRAIN_BATCH_TRAJS=8 WEIGHT_SYNC_EVERY=1 MAX_STEPS=20 CHECKPOINT_EVERY=0 \
        RUN_NAME=opd_smoke3_b200 WANDB_PROJECT=opd-v2-smoke \
        bash /opt/opd/launch/run_mn_beaker.sh"]
 
     envVars:
-      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below
-        value: "<PLACEHOLDER: /weka/run/opd_smoke3_b200>"
+      # RUN_DIR = this run's PRIVATE state dir (config.json, agentic pool, gather, weight-sync buffer, logs).
+      # It MUST be UNIQUE to the smoke and DISTINCT from the production RUN_DIR in opd_v33_b200.yaml
+      # (default /weka/run/opd_v33_b200) — sharing one dir clobbers config.json + the pool between runs.
+      # (JIT_CACHE_DIR below is the ONE dir that SHOULD be shared with production — it's the persistent
+      #  compile cache, so a smoke warms the kernels the full run then reuses.)
+      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below; smoke-only path
+        value: "<PLACEHOLDER: /weka/run/opd_smoke3_b200>"   # <- keep DIFFERENT from the production RUN_DIR
       - name: DEEPSEEK_V4_FLASH
         value: "<PLACEHOLDER: /models/DeepSeek-V4-Flash>"
       - name: STUDENT_PATH
