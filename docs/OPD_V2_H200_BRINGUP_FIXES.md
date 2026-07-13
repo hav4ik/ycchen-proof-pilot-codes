@@ -164,6 +164,30 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   models were fine).
 - **Pull the *new* digest.** A cached image without `/opt/cuda13-compat` reproduces fix-#1's crash — verify
   `ls /opt/cuda13-compat/libcuda.so*` after pulling, or pull by digest.
+
+- **⚠️ Validate the serve with the CHAT endpoint, not raw `/generate` — this cost us a full afternoon.** The deploy
+  student is a **reasoning/chat model**. Hitting `POST /generate` with `{"text": "..."}` (raw completion, no chat
+  template) is **out-of-distribution**, and the model degenerates — repetition, single-token collapse, mid-sentence
+  language-switching (e.g. `二十一th`). **This is NOT a serving or hardware bug.** Test via
+  `POST /v1/chat/completions` with `messages` + `temperature: 0` (applies the chat template + the
+  `--reasoning-parser deepseek-r1` scaffold the server sets) → a clean IMO-level Euclid proof
+  (`reasoning_content` + a `\boxed{}` answer, `finish_reason: stop`). The **real loop is unaffected** — the
+  producer builds `input_ids` *with* the prover/chat template, which is why the H200 loop trained fine (eos=100%).
+  **Cautionary tale:** the raw-`/generate` garbage *appeared* to correlate with GPU arch and CUDA driver (sm_100
+  vs sm_90; native cuda-13 vs cuda-12.8 forward-compat), and we nearly committed a "native cuda-13 serve is broken,
+  require a driver-570 node" theory + burned three rentals on it. It was **sampling noise on OOD input** — on the
+  **H200 whose raw `/generate` had collapsed (driver 595, native cuda-13.2)**, the chat endpoint returns a correct
+  Euclid proof. So serve correctness is a **prompt-format** issue, not a driver/arch one (broader confirmation —
+  the B200 chat endpoint — was in progress at time of writing). Always reproduce a suspected serve bug through the
+  chat endpoint before blaming the stack.
+
+- **B200 (sm_100) bring-up (2026-07-13).** *Trainer FA2 sink — VALIDATED:* `python /opt/opd/opd_v2_train_smoke.py`
+  → PASS (fp64-exact sink correction, **bit-exact** OPD JSD loss+grad, forward/sink-grad/q-k-v-grad parity within
+  bf16 tol, `torch.compile(fullgraph=True)` clean, packed doc-isolation 0 leak) — the FA2 wheel's **sm_100** kernel
+  is correct. *Rollout — serve stack + prompt-format proven on H200 native-cuda-13.2 (clean chat-endpoint proof);
+  the **B200 rollout chat-endpoint validation is PENDING.*** Run the trainer smoke **directly** (bare `python` =
+  the `/opt/conda` **cu128 trainer venv**); the `test_attention_sink.py -k fa2` wrapper mis-picks the cu130 *serve*
+  venv on native-cuda-13 nodes (its `cuda==12.8` guard then trips) — harness fix in `8240b78`, pending next rebuild.
 - **`Scale param shape … not divisible by 3` during weight-sync is BENIGN.** It's her loader (identical at
   `flash_rl/patches/loader.py:1087` / overlay `:1141`): the fused qkv scale dim isn't a clean 3× multiple
   because GQA makes q/k/v different sizes. The `rows_per_shard = dim//3` estimate that triggers the warning

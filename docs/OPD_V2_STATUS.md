@@ -101,12 +101,29 @@ Integrated (branch `opd/flashinfer-sink`), correctness-**validated** (100/100, i
 bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype — flashinfer +9% on bf16 KV but
 **triton +10% on production fp8 KV**. Kept as opt-in fallback (`ATTENTION_BACKEND=flashinfer`). Not merged.
 
-## 6 · OPEN ITEMS
+## 6 · B200 (sm_100) BRING-UP — trainer validated, rollout in progress (2026-07-13)
 
-1. **Rebuild `cu128` from HEAD** (bake `faf4c62`) → final ship digest; re-run acceptance §2 on it.
-2. Finish H200 acceptance: agentic loop (real producer) + JIT_CACHE_DIR persistence.
-3. **B200 hardware pass:** Beaker 3-node smoke → full 64× B200 V33 (first sm_100 run, MoE backend).
-4. (Backlog) cu129 serve rebase — cleaner than cu130+forward-compat; gated on Ai2 B200 driver version.
+- **Trainer FA2 sink on sm_100 — PASS.** `python /opt/opd/opd_v2_train_smoke.py` (bare `python` = `/opt/conda`
+  cu128 trainer venv): fp64-exact sink correction, **bit-exact** OPD JSD loss+grad, fwd/sink/q-k-v-grad parity,
+  `torch.compile` clean, doc-isolation 0. The FA2 wheel's sm_100 kernel is correct on Blackwell.
+- **Rollout serve stack + prompt-format — validated on H200 native-cuda-13.2** (clean chat-endpoint Euclid proof).
+  **B200 rollout chat-endpoint validation PENDING** (in progress).
+- **⚠️ Serve-validation lesson (cost an afternoon):** validate the serve with `POST /v1/chat/completions`
+  (`temperature:0`), NOT raw `/generate`. Raw completion on a reasoning/chat model is OOD → degenerate output
+  (repetition, single-token collapse, `二十一th` language-switching) that *mimics* a hardware/driver bug. It is not.
+  Confirmed on the H200 (driver 595, native cuda-13.2) whose raw `/generate` had collapsed: the chat endpoint
+  returns a correct proof → serve correctness is a **prompt-format** issue, not driver/arch. (A "native cuda-13
+  broken / require driver-570" theory was chased and **retracted**.) The `-k fa2` test wrapper mis-picks the serve
+  venv on native-cuda-13 → run the smoke directly (harness fix `8240b78`, pending rebuild). Details:
+  `OPD_V2_H200_BRINGUP_FIXES.md` §Operational gotchas.
+
+## 7 · OPEN ITEMS
+
+1. **Final drift-clean rebuild** before Ai2 handoff — bakes `8240b78` (test-harness venv fix) + anything else B200
+   surfaces; re-stamp the ship digest. (`451201a8` is valid now; its only un-baked commit is test-only.)
+2. **B200 teacher** (DeepSeek-V4-Flash, TP4 → needs 4×B200) + **Beaker 3-node smoke** (multi-node launcher) → full
+   64× V33. Student side (trainer FA2 + rollout) already green on sm_100.
+3. (Backlog) cu129 serve rebase — cleaner than cu130+forward-compat; not required (serve works native on cuda-13).
 
 ## Doc index (all under `docs/`, on `opd/b200-cu128`)
 `OPD_V2_STATUS.md` (this) · `OPD_V2_H200_BRINGUP_FIXES.md` (bugs #1–#10 + gotchas) · `OPD_V2_H200_SMOKE.md`
