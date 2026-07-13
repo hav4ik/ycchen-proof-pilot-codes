@@ -62,9 +62,12 @@ ENV CUDA_HOME=/usr/local/cuda-12.8 \
 # CUDA_HOME=/usr/local/cuda-13.0 so the serve JIT uses this toolkit; the base/trainer venv stays cu128.
 RUN set -eux; \
     apt-get update; apt-get install -y --no-install-recommends \
-      cuda-nvcc-13-0 cuda-cudart-dev-13-0 cuda-cccl-13-0; \
+      cuda-nvcc-13-0 cuda-cudart-dev-13-0 cuda-cccl-13-0 cuda-libraries-dev-13-0; \
     rm -rf /var/lib/apt/lists/*; \
+    test -f /usr/local/cuda-13.0/include/curand.h; \
     /usr/local/cuda-13.0/bin/nvcc --version | grep release
+# cuda-libraries-dev-13-0 adds the CUDA math-library dev headers (cuRAND/cuBLAS/cuSOLVER/cuSPARSE/...):
+# flashinfer's JIT sampling kernel needs curand.h, and nvcc+cudart+cccl alone don't provide it.
 
 # opd_v2 runtime deps (trainer + orchestrator). torch/flash_attn already in base.
 # transformers is PINNED to Yi-Chia's 5.9.0: the base ships 5.13.0, which broke olmo3_sink's rope
