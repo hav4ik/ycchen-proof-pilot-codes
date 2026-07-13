@@ -163,6 +163,11 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   models were fine).
 - **Pull the *new* digest.** A cached image without `/opt/cuda13-compat` reproduces fix-#1's crash — verify
   `ls /opt/cuda13-compat/libcuda.so*` after pulling, or pull by digest.
+- **`Scale param shape … not divisible by 3` during weight-sync is BENIGN.** It's her loader (identical at
+  `flash_rl/patches/loader.py:1087` / overlay `:1141`): the fused qkv scale dim isn't a clean 3× multiple
+  because GQA makes q/k/v different sizes. The `rows_per_shard = dim//3` estimate that triggers the warning
+  is only used to *skip missing* shards; present shards are placed at their correct offset by their **actual**
+  size (`shard_scale.shape[0]`), so nothing is mis-scaled. Cosmetic — fires in her prod too; left as-is.
 
 ## Quick reference
 
