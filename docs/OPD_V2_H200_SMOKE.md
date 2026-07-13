@@ -11,12 +11,17 @@ of `env_1node_smoke.sh`; it uses the in-repo `problems.parquet` and drops to 40k
 Layout (**4:2:2**): teacher DeepSeek-V4-Flash TP4 → GPU 0-3 · rollout student TP2 → 4-5 · trainer
 FSDP2+CPU-offload world 2 → 6-7 · orchestrator on CPU.
 
-Every command below is copy-paste, top to bottom, **on the fresh H200 node**. The whole sequence:
+**How you run these:** on these single-node instances you **SSH straight into the container** (your
+prompt is `root@…:/opt/opd/repo/…`), so every command below runs **directly inside the container** — no
+`docker run` wrapper, no `-e`/`-v` flags. The whole sequence:
 
-> **preflight → pull image → download models → Shot 1 (plumbing) → watch → Shot 2 (real path)**
+> **preflight → verify image → download models → Shot 1 (plumbing) → watch → Shot 2 (real path)**
 
 The first run is the first time any of this executes on a GPU, so we do it in two shots (§Step 3): a
 cheap `single_round` plumbing check, then the real `agentic`+dsflash path.
+
+*(Driving Docker from a separate host instead? Wrap the Step-3 env in
+`docker run --rm -it --gpus all --ipc=host --shm-size=64g -v /models:/models -v /runs:/runs -e STUDENT_PATH=… … chankhavu/ycchen-opd:cu128 bash -lc '…'`.)*
 
 ---
 
@@ -130,8 +135,9 @@ docker run --rm -it --gpus all --ipc=host --shm-size=64g \
 Every `-e` here is already the `env_1node_smoke.sh` **baked default** (shown for visibility) — drop them
 and just `source env_1node_smoke.sh && bash run_1node.sh`. **The node needs network** for the agentic
 seed, or pre-seed once: `python -m opd_v2.agentic.seed --run-dir /runs/opd_1node_smoke`. If the world-2
-trainer OOMs at 57k, see Troubleshooting (`MICRO`↓, `TRAINER_NPROC=3`). For live metrics add
-`-e WANDB_MODE=online -e WANDB_API_KEY=…`.
+trainer OOMs at 57k, see Troubleshooting (`MICRO`↓, `TRAINER_NPROC=3`). W&B is **online by default** —
+pass `-e WANDB_API_KEY=…` (or `wandb login` in-container) so metrics stream to the cloud; add
+`-e WANDB_MODE=offline` for a no-network run and `wandb sync <run-dir>/wandb/offline-run-…` afterward.
 
 ## Step 4 — watch it (from another shell on the node)
 

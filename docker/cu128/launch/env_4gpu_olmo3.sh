@@ -40,4 +40,6 @@ export CHUNK_SIZE="${CHUNK_SIZE:-2048}" CPU_OFFLOAD="${CPU_OFFLOAD:-1}" TRAIN_BA
 export BETA="${BETA:-1.0}" LR="${LR:-1e-5}" WEIGHT_SYNC_EVERY="${WEIGHT_SYNC_EVERY:-4}" G4_EVERY="${G4_EVERY:-5}" LOG_EVERY="${LOG_EVERY:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-0}" CHECKPOINT_KEEP="${CHECKPOINT_KEEP:-1}" HF_EXPORT="${HF_EXPORT:-0}" RESUME="${RESUME:-0}"
 export RUN_NAME="${RUN_NAME:-opd_4gpu_olmo3}" MAX_STEPS="${MAX_STEPS:-20}"
-export WANDB_MODE="${WANDB_MODE:-offline}" WANDB_PROJECT="${WANDB_PROJECT:-opd-v2-4gpu}"
+# online by default (matches opd_v2 config.py wandb_mode="online"); needs WANDB_API_KEY in the env (or
+# `wandb login`). Set WANDB_MODE=offline for a no-network run; `wandb sync <dir>` uploads it afterward.
+export WANDB_MODE="${WANDB_MODE:-online}" WANDB_PROJECT="${WANDB_PROJECT:-opd-v2-4gpu}"

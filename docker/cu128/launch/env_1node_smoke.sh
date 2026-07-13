@@ -42,7 +42,9 @@ export BETA="${BETA:-1.0}" LR="${LR:-1e-5}" WEIGHT_SYNC_EVERY="${WEIGHT_SYNC_EVE
 # Set CHECKPOINT_EVERY=10 (+ ensure ~500GB-1TB free) to also validate the checkpoint-save path.
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-0}" CHECKPOINT_KEEP="${CHECKPOINT_KEEP:-1}" HF_EXPORT="${HF_EXPORT:-0}" RESUME="${RESUME:-0}"
 export RUN_NAME="${RUN_NAME:-opd_1node_smoke}" MAX_STEPS="${MAX_STEPS:-20}"
-export WANDB_MODE="${WANDB_MODE:-offline}" WANDB_PROJECT="${WANDB_PROJECT:-opd-v2-smoke}"
+# online by default (matches opd_v2 config.py wandb_mode="online"); needs WANDB_API_KEY in the env (or
+# `wandb login`). Set WANDB_MODE=offline for a no-network run; `wandb sync <dir>` uploads it afterward.
+export WANDB_MODE="${WANDB_MODE:-online}" WANDB_PROJECT="${WANDB_PROJECT:-opd-v2-smoke}"
 
 # ---- LIGHTER validation without the dataset: the single_round producer ----
 # single_round has NO min_gen_room floor -> smaller context, no seed/network needed. It draws prompts
