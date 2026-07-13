@@ -10,7 +10,7 @@
 #
 #   CUDA_VISIBLE_DEVICES=4 ./run_rollout_fp8.sh --port 8200
 #
-# Tunables via env: SIF MODEL PORT TP MEMFRAC MAXRUN CUDA_GRAPH_MAX_BS CHUNKED_PREFILL CONTEXT_LEN
+# Tunables via env: SIF MODEL PORT TP DP MEMFRAC MAXRUN CUDA_GRAPH_MAX_BS CHUNKED_PREFILL CONTEXT_LEN
 #                   KV_CACHE_DTYPE SWA_RATIO   (long-context KV memory savings; see below)
 #   CUDA_GRAPH_MAX_BS defaults to MAXRUN: when conc(MAXRUN)>10 you **must** raise it too, otherwise the
 #   cuda graph only captures up to the default bs and larger batches fall back to eager and slow down
@@ -28,8 +28,22 @@ ROOT="${ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
 
 SIF=${SIF:-/images/sglang.sif}     # 0.5.12.post1
 MODEL=${MODEL:-$ROOT/outputs/stage1-v2-7b-deploy}
-PORT=8200; TP=1
-while [ $# -gt 0 ]; do case "$1" in --port) PORT=$2; shift 2;; --tp) TP=$2; shift 2;; *) shift;; esac; done
+PORT=8200
+TP="${TP:-1}"
+DP="${DP:-1}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) PORT=$2; shift 2 ;;
+    --tp) TP=$2; shift 2 ;;
+    --dp|--dp-size) DP=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+if ! [[ "$TP" =~ ^[1-9][0-9]*$ && "$DP" =~ ^[1-9][0-9]*$ ]]; then
+  echo "TP and DP must be positive integers" >&2
+  exit 2
+fi
 
 SGL=${SGLANG_PKG_DIR:-/sgl-workspace/sglang/python/sglang}
 SINK=$ROOT/deploy/target/olmo2_sink.py                  # in-engine sink target
@@ -64,6 +78,13 @@ EXTRA_ARGS=()
 #    real crash; a single replica can't reproduce it locally) -> fall back to NCCL all-reduce (7B TP4 decode
 #    all-reduce is small, goes over NVLink, throughput impact negligible).
 [ "${TP:-1}" -gt 1 ] && EXTRA_ARGS+=(--disable-custom-all-reduce)
+
+# Native SGLang DP creates DP independent TP groups behind one HTTP endpoint.
+# For example, CUDA_VISIBLE_DEVICES=0,...,7 --tp 1 --dp 8 launches eight
+# single-GPU policy replicas and SGLang's DataParallelController distributes
+# requests among them. Do not enable DP-attention here: OLMo3Sink uses standard
+# attention and this launcher needs ordinary whole-model replicas.
+[ "$DP" -gt 1 ] && EXTRA_ARGS+=(--dp-size "$DP")
 
 # NOTE on memory: each reload needs transient scratch for the bf16->fp8
 # re-quant. fp8 frees ~6GB of weights vs bf16; keep mem-fraction-static at a

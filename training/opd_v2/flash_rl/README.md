@@ -80,6 +80,56 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 KV_CACHE_DTYPE=fp8_e4m3 SWA_RATIO=0.5 CONTEXT_LEN=6
 After that, call `/update_weights_from_disk` as usual (OPD's `RolloutClient.update_weights_from_disk(path)`
 needs no change), and sglang re-quantizes the new bf16 checkpoint to fp8 automatically.
 
+### Native SGLang DP for policy rollout
+
+For a 32B policy that fits on one GPU after FP8 quantization, use SGLang native
+data parallelism rather than a large TP group. `--tp 1 --dp 8` creates eight
+whole-model replicas under one SGLang `DataParallelController`; each request
+uses no decode-time TP collectives. One policy node therefore contributes one
+rollout URL, while SGLang load-balances its requests across eight GPUs.
+
+```bash
+# One eight-GPU policy node: eight single-GPU SGLang replicas behind :8200.
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 MAXRUN=48 \
+  ./run_rollout_fp8.sh --port 8200 --tp 1 --dp 8
+
+# A second policy node starts the same command on :8200. OPD sees two endpoints.
+export ROLLOUT_URLS="http://policy-a:8200,http://policy-b:8200"
+export ROLLOUT_MAXRUN=48
+export TARGET_INFLIGHT=768  # 16 GPU replicas x 48 requests; tune for teacher/buffer capacity.
+```
+
+`--dp` here maps directly to SGLang `--dp-size`; it is not a `--replicas`
+alias. Do not add `--enable-dp-attention` for OLMo3Sink: that is the separate
+MLA/MoE-oriented DPA mode, while this deployment needs ordinary full-model DP.
+The native controller is single-node only for ordinary DP, so run one server on
+each policy node and list the node endpoints in `ROLLOUT_URLS`.
+
+### Fallback: independent processes
+
+`run_rollout_fp8_replicas.sh` remains available for environments where native
+SGLang DP is unsuitable. It starts independent servers on separate ports; it is
+not SGLang DP and uses only `--replicas`, never `--dp`.
+
+Use `run_rollout_fp8_replicas.sh` once per policy node:
+
+```bash
+# Node A: eight independent policy processes on ports 8200-8207.
+GPU_IDS=0,1,2,3,4,5,6,7 ADVERTISE_HOST=node-a \
+  ./run_rollout_fp8_replicas.sh --replicas 8 --tp 1 --port-base 8200
+
+# Node B: repeat with ADVERTISE_HOST=node-b. Then combine both generated files:
+export ROLLOUT_URLS="$(paste -sd, node-a-logs/rollout_urls.txt),$(paste -sd, node-b-logs/rollout_urls.txt)"
+export ROLLOUT_MAXRUN=48
+export TARGET_INFLIGHT=768  # 16 replicas x 48 requests; reduce if the teacher/buffer is limiting.
+```
+
+`replicas * tp` must equal the number of GPU ids passed to `--gpu-ids` or
+`GPU_IDS`. Each policy process is updated by the orchestrator during weight
+sync, so do not omit any generated URL. `REGEN_LOADER=1` is intentionally
+rejected with more than one process; regenerate the bind-mounted patch once
+before the launch instead.
+
 ### Regenerate the patched loader when switching sglang versions
 `patches/loader.py` is extracted and modified from the 0.5.12.post1 image (version-dependent). When switching
 versions, re-apply by anchor strings with `apply_patch.py` (idempotent; errors clearly if an anchor doesn't match):
