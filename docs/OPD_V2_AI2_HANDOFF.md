@@ -1,0 +1,95 @@
+# OPD v2 — Ai2 operator handoff (what YOU need to provide)
+
+Everything else — the training/serving code, both venvs, Yi-Chia's patches, the launchers, the teacher's
+`flashinfer_mxfp4` MoE auto-detect — is **baked into the image**. To run the loop on your Beaker cluster you
+provide exactly three things: **(1) the 2 model checkpoints in the right mount paths, (2) a WRITABLE shared
+run dir, and (3) a WRITABLE shared JIT-compile cache dir.** Then fill the site-specific placeholders and submit.
+
+**Image (ship digest, drift-clean, all B200 fixes validated on B200):**
+```
+chankhavu/ycchen-opd:cu128@sha256:4c0d4276dc45fe21877dc0d6d028887f4c8a6d91ae91e102eb90c262b3726222
+```
+(Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
+
+---
+
+## 1 · Download the 2 models to Weka (both are PUBLIC — no HF token)
+
+| role | HF repo | ~size | **mount path in the job** |
+|---|---|---|---|
+| **teacher** | `deepseek-ai/DeepSeek-V4-Flash` | ~83 GB (fp4 experts + fp8 dense) | `/models/DeepSeek-V4-Flash` |
+| **student** | `chankhavu/yccchen-olmo3-deploy` | ~64 GB (deploy-format Olmo3-32B) | `/models/student-deploy` |
+
+**Only ONE student checkpoint is needed** — the deploy-format model works for BOTH the trainer and the rollout
+(`STUDENT_PATH` = `ROLLOUT_MODEL` = `STUDENT_DEPLOY_PATH` = `/models/student-deploy`).
+
+Download **once** to a Weka location (the mounts below make it read-only in the job). HF's `xet`/`hf_transfer`
+accelerators can stall on large files — disable them for reliability:
+```bash
+export HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=0
+hf download deepseek-ai/DeepSeek-V4-Flash  --local-dir /weka/<bucket>/models/DeepSeek-V4-Flash  --max-workers 4
+hf download chankhavu/yccchen-olmo3-deploy --local-dir /weka/<bucket>/models/student-deploy      --max-workers 4
+# sanity: each dir must have config.json + model-*.safetensors shards
+```
+The `hf` CLI is inside the image, so you can also run these from a throwaway container.
+
+## 2 · Provide the three writable/shared paths
+
+| path (in-job) | must be | why |
+|---|---|---|
+| `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
+| **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. |
+| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. |
+
+**About the JIT cache (your "writable/saveable cache dir"):** the DeepSeek-V4 teacher JIT-compiles fp8/fp4
+kernels **per GEMM shape** — a cold node spends **~10–20 min** on DeepGEMM + **~15 min** on the flashinfer fp4
+autotune at first launch. With a writable, persistent `JIT_CACHE_DIR` this is a **one-time** cost: the run
+scripts arch+role-scope it (`sm100/{teacher,rollout}/…`), so the first replica compiles and **every later
+replica + future run reuses it**. Point it at Weka so it survives job restarts. (An image-baked pre-warm to
+skip even the first compile is prepared but pending a HuggingFace outage; the writable dir is what matters.)
+
+## 3 · Fill the Beaker placeholders (both yamls, same set)
+
+In `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke), replace every
+`<PLACEHOLDER: …>`:
+- `budget` — e.g. `ai2/oe-training`
+- `constraints.cluster` — your B200 cluster name
+- `datasets` Weka `weka: <bucket>` + `subPath:` for the run dir + both models (the **run-dir mount must be
+  WRITABLE** — Weka experiment mounts are RW at Ai2 in practice; confirm on your cluster)
+- `JIT_CACHE_DIR` value → a fixed Weka path
+- `NCCL_SOCKET_IFNAME` (e.g. `ib`) + `NCCL_IB_HCA` (e.g. `^=mlx5_bond_0`) for your IB fabric
+- `resources.sharedMemory` (e.g. `128GiB` — the teacher hidden spool lives in `/dev/shm`, default 5 GiB is too small)
+- `context.priority`, `timeout`
+- W&B: set `WANDB_API_KEY` from a Beaker **secret** (`beaker secret write wandb-api-key <key>`); it's already
+  online by default. (`HF_TOKEN` is **not** needed — models + seed dataset are public.)
+
+## 4 · Submit: smoke first, then the full run
+
+```bash
+# (a) 3-node launcher smoke — validates rank->role, the shared-FS hostname gather, cross-node c10d, health gate
+beaker experiment create docker/cu128/launch/beaker/opd_smoke3_b200.yaml
+#     green = all 3 replicas gather hostnames, teacher+rollout health-pass, trainer forms world 8,
+#             steps 1..20 with loss ↓, weight-sync ticking (footer of the yaml has the full checklist)
+
+# (b) full 64x B200 V33 — her production config
+beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
+```
+
+---
+
+## What runs (no action needed — for context)
+
+- **Topology (her V33): 1 teacher + 4 rollout + 3 trainer = 8 nodes × 8 B200 = 64 GPUs**, world-24 trainer.
+  (`ROLLOUT_NNODES` is a one-knob override to 5 → 1+5+2 if `starved_frac` ever spikes rollout-bound; default
+  stays her validated 1+4+3.)
+- **Seed dataset** auto-downloads at runtime from the public `chankhavu/ycchen-dsflash-proof-distill-v2-test`
+  (a user-owned byte-faithful mirror). The node just needs HF network at pool init; to run fully offline,
+  pre-build once: `python -m opd_v2.agentic.seed --run-dir <RUN_DIR>` → `<RUN_DIR>/pool/seed.jsonl`.
+- **Teacher MoE backend is auto-selected** (`flashinfer_mxfp4` on B200) — no flag needed. Student rollout uses
+  the `triton` attention-sink; trainer uses `olmo3_sink_fa2`. All validated on B200.
+- **Checkpoints** land in `<RUN_DIR>/checkpoints/step_<N>/` every 50 steps: a DCP shard (exact resume) + a
+  consolidated **bf16 HF** export in `step_N/hf/` (run `deploy/make_olmo3sink_deploy.py` on it before serving).
+- **Memory:** her knobs (`MEMFRAC 0.82`, `MICRO 131072`) were tuned at the ~140 GB (H200) edge; B200's 180 GB
+  gives ~40 GB more headroom — nothing needs re-tuning.
+
+Full pre-ship gate: `OPD_V2_SHIP_CHECKLIST.md`. Launcher details: `beaker/README.md`.
