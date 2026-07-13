@@ -1,9 +1,10 @@
 # OPD v2 — FlashInfer attention-sink: evaluation & decision
 
-**Decision (2026-07-13): production stays on `triton`.** The native FlashInfer attention-sink path is
-integrated, GPU-correctness-validated, and kept as a **proven fallback**, but the measured gain (~9% on
-bf16 KV) does not justify FlashInfer's fp8-native attention deviation on a precision-sensitive model where
-Yi-Chia's validated production backend is `triton`.
+**Decision (2026-07-13): production stays on `triton` — decisively.** The native FlashInfer attention-sink
+path is integrated, GPU-correctness-validated, and kept as a **proven fallback**, but on the **production KV
+dtype (`fp8_e4m3`) triton is ~10% FASTER than FlashInfer** — FlashInfer's ~9% edge exists only on bf16 KV,
+which production does not use. So there is **no throughput case** for FlashInfer in production, on top of its
+fp8-native-attention deviation from Yi-Chia's validated `triton` path.
 
 ## What it is
 
@@ -30,10 +31,19 @@ sink wrapper isn't importable.
 
 ## Throughput A/B
 
-Measured **~525 tok/s (flashinfer) vs ~481 (triton)** ≈ **+9%** — BUT on **bf16 KV** (the A/B left
-`KV_CACHE_DTYPE` unset → sglang default). Production runs **fp8 KV** (`KV_CACHE_DTYPE=fp8_e4m3`), so re-run
-with `-e KV_CACHE_DTYPE=fp8_e4m3` on both backends for the production-representative number (that also
-exercises the exact fp8 path discussed below).
+Rollout-only, TP2, 16 concurrent `/generate` × 512 new tokens, steady-state `gen throughput (token/s)`:
+
+| KV dtype | triton | FlashInfer | winner |
+|---|---|---|---|
+| `bf16` (not used in prod) | ~481 | ~525 | FlashInfer **+9%** |
+| **`fp8_e4m3` (PRODUCTION)** | **~497** | **~450** | **triton +10%** |
+
+**The advantage flips with KV dtype.** FlashInfer is faster only on **bf16 KV**, which production does not use.
+On the **production `fp8_e4m3` KV**, **triton wins by ~10%**: triton's fp8-KV read is cheap (bandwidth) and it
+dequantizes to a well-tuned bf16 attention kernel, whereas FlashInfer's fp8-native sink kernel (JIT,
+dtype-specific, `k_scale`/`v_scale` handling) is the slower path here. So on the config that actually ships,
+FlashInfer has **no throughput advantage — it is slower.** (Note triton itself gets *faster* going bf16→fp8
+KV, 481→497, from the reduced KV bandwidth; FlashInfer gets *slower*, 525→450.)
 
 ## The fp8-precision nuance (why the decision is conservative)
 
@@ -50,11 +60,15 @@ exercises the exact fp8 path discussed below).
 
 ## Decision & rationale
 
-**Keep `triton` for the production/Beaker run.** Yi-Chia's validated production is triton + fp8 KV;
-FlashInfer's fp8-native attention is a bounded-but-real deviation from that exact path, and ~9% (bf16) does
-not justify it on a precision-sensitive model. FlashInfer stays a **proven fallback**: flip
-`ATTENTION_BACKEND=flashinfer` if rollout throughput ever becomes the actual bottleneck, and re-validate the
-production checklist (tests 1–4 in [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md)) on that image first.
+**Keep `triton` for the production/Beaker run — decisively.** On the production KV dtype (`fp8_e4m3`) triton
+is **~10% faster** than FlashInfer (§Throughput A/B), so there is **no throughput case** for FlashInfer in
+production — its ~9% bf16 win doesn't apply to the config that ships. Add the fp8-native-attention deviation
+from Yi-Chia's validated `triton` path, and the choice is unambiguous. FlashInfer stays a **correctness-
+validated fallback** — flip `ATTENTION_BACKEND=flashinfer` and re-validate the production checklist (tests
+1–4 in [OPD_V2_H200_SMOKE.md](OPD_V2_H200_SMOKE.md)) on that image first — but there is no reason to adopt it.
+
+**Status: chapter closed.** FlashInfer sink = integrated, correctness-validated, benchmarked (both KV dtypes),
+documented, and deliberately **not** in the production path. Production ships the plain `cu128` (triton).
 
 On-policy note: switching would **not bias training** — the student trains on its *own* rollouts, so a small
 rollout-attention numeric difference only shifts which tokens are sampled, not the objective. But matching the
