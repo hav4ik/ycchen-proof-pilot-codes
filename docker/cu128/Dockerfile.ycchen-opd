@@ -149,16 +149,21 @@ RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
 
 # flashinfer-sink: bump the serve venv's flashinfer 0.6.12 -> 0.6.14 in lockstep with the
 # native attention-sink JIT overlay (layers/attention/flashinfer_backend.py imports
-# get_batch_prefill_attention_sink_uri / attention_sink_decl, added in 0.6.14). jit-cache
-# wheels are cuda-specific -> pull them from the cu130 index (this serve venv is cu130);
-# flashinfer-python / flashinfer-cubin come from PyPI. Pin all three to the same version.
+# get_batch_prefill_attention_sink_uri / attention_sink_decl, added in 0.6.14). The three
+# flashinfer packages live on DIFFERENT indexes (mirrors the fork's Dockerfile):
+#   * flashinfer-python  -> PyPI
+#   * flashinfer-cubin   -> flashinfer.ai/whl ROOT index (0.6.14 is NOT on PyPI, max 0.6.13 there)
+#   * flashinfer-jit-cache-> cuda-specific cu130 index (this serve venv is cu130)
+# So add BOTH flashinfer indexes + unsafe-best-match so uv searches every index per package.
 RUN --mount=type=cache,target=/root/.cache/uv set -eux; \
     uv pip install --python "${SERVE_VENV}/bin/python" --prerelease=allow \
+        --index-strategy unsafe-best-match \
+        --extra-index-url https://flashinfer.ai/whl/ \
         --extra-index-url https://flashinfer.ai/whl/cu130/ \
         "flashinfer-python==0.6.14" \
         "flashinfer-cubin==0.6.14" \
         "flashinfer-jit-cache==0.6.14"; \
-    "${SERVE_VENV}/bin/python" -c "import importlib.metadata as md; print('flashinfer-python', md.version('flashinfer-python'))"
+    "${SERVE_VENV}/bin/python" -c "import importlib.metadata as md; print('flashinfer', md.version('flashinfer-python'), '| cubin', md.version('flashinfer-cubin'), '| jit-cache', md.version('flashinfer-jit-cache'))"
 
 # CUDA-13 forward-compat libcuda for the (inherently CUDA-13) serve venv — see the cuda13compat stage
 # note at the top. Loaded conditionally by run_{teacher,rollout}.sh only on pre-CUDA-13 drivers.

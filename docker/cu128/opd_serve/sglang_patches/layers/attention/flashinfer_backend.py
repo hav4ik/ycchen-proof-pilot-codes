@@ -83,10 +83,11 @@ def _run_flashinfer_paged_with_sinks(
     v_scale: Optional[float] = None,
 ):
     """Run FlashInfer's dedicated paged attention-sink JIT wrapper."""
+    # Our sink Parameter stays bf16 (triton-path parity + flash_rl reload fidelity to
+    # the H200-verified setup); FlashInfer's JIT requires fp32, so cast the tiny
+    # per-head sink tensor here at the call site rather than storing it as fp32.
     if sinks.dtype != torch.float32:
-        raise TypeError(
-            f"FlashInfer attention sinks must be float32, got {sinks.dtype}"
-        )
+        sinks = sinks.to(torch.float32)
     if logits_soft_cap not in (None, 0.0):
         raise ValueError(
             "FlashInfer's attention-sink JIT does not support soft capping"

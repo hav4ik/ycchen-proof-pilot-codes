@@ -164,10 +164,15 @@ class Olmo2Attention(nn.Module):
         # Olmo2/Olmo3 checkpoints are unaffected.
         self.sinks = None
         if getattr(config, "sink_init_value", None) is not None:
-            # FlashInfer's attention-sink JIT rejects non-FP32 sinks; Triton and
-            # trtllm_mha accept FP32 too, so use a backend-independent FP32 sink
-            # (was backend-conditional bf16/fp32 -> forced fp32 for the flashinfer path).
-            sinks_dtype = torch.float32
+            # Keep her original per-backend sink dtype: bf16 by default (the triton
+            # path), fp32 only for trtllm_mha. FlashInfer's JIT needs fp32 sinks, but
+            # the flashinfer backend casts the bf16 param -> fp32 at the kernel call
+            # (see _run_flashinfer_paged_with_sinks), so the STORED param and the
+            # flash_rl reload stay bf16-identical to the H200-verified triton setup.
+            attn_backend = get_global_server_args().attention_backend
+            sinks_dtype = (
+                torch.float32 if attn_backend == "trtllm_mha" else torch.bfloat16
+            )
             self.sinks = nn.Parameter(
                 torch.empty(self.num_heads, dtype=sinks_dtype), requires_grad=False
             )
