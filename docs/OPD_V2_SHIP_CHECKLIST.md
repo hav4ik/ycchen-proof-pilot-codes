@@ -90,7 +90,7 @@ before shipping, and prove no code/config commit is un-baked (§1).**
       | `TRAIN_BATCH_TRAJS` | 4 | **64** |
       | `MAX_TRAJ_TOKENS`/`MICRO` | 57344 | **130816 / 131072** |
       | bundle caps | 8k / 8k | **40k / 50k** |
-      | `CHECKPOINT_EVERY` | 0 (smoke) / 5 (test) | **50** |
+      | `CHECKPOINT_EVERY` | 0 (smoke) / 5 (test) | **25** (intentional op change from her 50; not a smoke leak) |
 - [ ] Her training config intact: `LR=1e-5`, `constant` schedule (no warmup), `β=1.0`, adam `(0.9, 0.95)`,
       `MAX_STEPS=100000`, `max_staleness=0`.
 - [ ] **Teacher serve backend = hers, unmodified.** `run_teacher.sh` keeps `MOE_BACKEND=auto` (the stock

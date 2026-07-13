@@ -115,8 +115,10 @@ filter, 140k ctx / 128k gen, 32B student.
 `ycchen/proof-pilot-datasets` → `step10-opd-pool-rollouts/agentic_32b_lc140k_v33/config.json` (that
 dataset is her Stage-2 reproducibility artifacts, incl. the OPD pool + admitted rollout shards; the OPD
 seed is still `dsflash-proof-distill-v2-test`, unchanged). Verified field-by-field against
-`docker/cu128/launch/env_v33_b200.sh`: **identical except `attn` (`olmo3_sink_fa3` → `olmo3_sink_fa2`),
-our one intended B200 delta.** Confirms β=1 revKL, V34 off, `max_staleness=0`, seed
+`docker/cu128/launch/env_v33_b200.sh`: **identical except two intended deltas — (1) `attn`
+(`olmo3_sink_fa3` → `olmo3_sink_fa2`), the B200 kernel swap, and (2) `CHECKPOINT_EVERY` (50 → 25),
+an operational change (more frequent durable ckpts; does not touch training dynamics/optimizer/RNG/data
+order — the model at any step is bit-identical).** Confirms β=1 revKL, V34 off, `max_staleness=0`, seed
 `dsflash-proof-distill-v2-test`.
 
 Notable non-default choices:

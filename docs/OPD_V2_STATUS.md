@@ -93,7 +93,7 @@ slower); inverts in prod (4 rollout nodes, WSYNC=4). **H200 functional acceptanc
 
 Her knobs: **LR 1e-5, constant schedule (no warmup), β=1.0 (reverse-KL), adam (0.9,0.95), MAX_STEPS 100000,
 max_staleness 0, WEIGHT_SYNC_EVERY 4, TRAIN_BATCH_TRAJS 64, MEMFRAC 0.82, max_prompt_tokens 100000 (default),
-MAX_TRAJ 130816, bundle caps 40k/50k, CHECKPOINT_EVERY 50.** **Smoke scales these DOWN — none may leak to prod**
+MAX_TRAJ 130816, bundle caps 40k/50k, CHECKPOINT_EVERY 25 (intentional op change; her original 50).** **Smoke scales these DOWN — none may leak to prod**
 (smoke: MEMFRAC 0.70, batch 4, WSYNC 1, AGENTIC_MAX_PROMPT_TOKENS MAX_TRAJ/2, MAX_TRAJ 57344, bundle 8k). See the
 audit table in `OPD_V2_SHIP_CHECKLIST.md §4`.
 

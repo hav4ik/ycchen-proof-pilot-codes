@@ -145,8 +145,10 @@ kernels that the full run then reuses.
   pre-build once: `python -m opd_v2.agentic.seed --run-dir <RUN_DIR>` → `<RUN_DIR>/pool/seed.jsonl`.
 - **Teacher MoE backend is auto-selected** (`flashinfer_mxfp4` on B200) — no flag needed. Student rollout uses
   the `triton` attention-sink; trainer uses `olmo3_sink_fa2`. All validated on B200.
-- **Checkpoints** land in `<RUN_DIR>/checkpoints/step_<N>/` every 50 steps: a DCP shard (exact resume) + a
-  consolidated **bf16 HF** export in `step_N/hf/` (run `deploy/make_olmo3sink_deploy.py` on it before serving).
+- **Checkpoints** land in `<RUN_DIR>/checkpoints/step_<N>/` every 25 steps (`CHECKPOINT_EVERY`, keep last 2):
+  a DCP shard (exact resume) + a consolidated **bf16 HF** export in `step_N/hf/` (run
+  `deploy/make_olmo3sink_deploy.py` on it before serving). Each write is a full DCP + ~64 GB HF export, so at
+  25-step cadence budget ~2× the checkpoint I/O of a 50-step cadence.
 - **Memory:** her knobs (`MEMFRAC 0.82`, `MICRO 131072`) were tuned at the ~140 GB (H200) edge; B200's 180 GB
   gives ~40 GB more headroom — nothing needs re-tuning.
 
