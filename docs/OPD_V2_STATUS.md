@@ -111,6 +111,10 @@ bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype �
   native-cuda-13.2.
 - **Teacher (DeepSeek-V4-Flash) on sm_100 — VALIDATED** (`MOE_BACKEND=flashinfer_mxfp4`, TP4, 4×B200): clean Euclid
   proof + **prefill throughput 40–45k tok/s** @ concurrency 8–16 (`bench_teacher_prefill.py`; matches/beats H200).
+  **On the ORIGINAL `deepseek-ai/DeepSeek-V4-Flash` (her exact model) — NOT the `nvidia/…-NVFP4` repackage.** Its
+  experts are already fp4; `flashinfer_mxfp4` runs them natively (autotuner engaged `trtllm_fp4_block_scale_moe`).
+  So the only B200 delta is the MoE *kernel* (marlin→flashinfer_mxfp4), a hardware adaptation — no model swap, no
+  nvidia dependency, same weights she used on Hopper.
   **Big finding — fp8 MoE for DeepSeek-V4 is UNSUPPORTED by design:** V4's experts are fp4 (only attn/router/dense
   are fp8), so on sm_100 `auto`→triton crashes ("Hidden size mismatch"), and `deep_gemm` (swiglu/JIT-EP shape
   guard) + `flashinfer_trtllm` (format_is_bypassed) also fail — all forcing fp8 kernels on fp4 weights (sglang
