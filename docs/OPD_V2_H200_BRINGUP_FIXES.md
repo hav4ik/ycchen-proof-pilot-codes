@@ -169,6 +169,28 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   is only used to *skip missing* shards; present shards are placed at their correct offset by their **actual**
   size (`shard_scale.shape[0]`), so nothing is mis-scaled. Cosmetic — fires in her prod too; left as-is.
 
+- **"Teacher prefill is slow / inconsistent" is usually a metric artifact + a config choice, not a teacher bug.**
+  Two things conspire on a cold node:
+  1. **The `input throughput (token/s)` on the FIRST chunk of each `/score` is idle-polluted** — sglang computes
+     it as `tokens ÷ time-since-last-activity`, which includes the wait for the rollout to deliver the next
+     trajectory. Low numbers there (30–200 tok/s) do **not** mean slow prefill: the same-second remainder chunk
+     shows the real rate (10–40k tok/s). Sanity check: `first-chunk-tokens ÷ idle-gap ≈ the shown number` (e.g.
+     `11264 ÷ 54 s = 208` matched a logged `206.28`). If the low chunk were real it'd take minutes, but the next
+     chunk logs 0 s later — so it didn't.
+  2. **Small prefills are launch-bound.** The teacher is DeepSeek-V4 (MoE+MLA+DSA) run **eager**
+     (`--disable-cuda-graph`, hers — correct: cuda-graph is a decode opt, prefill has varying shapes), so a
+     forward pass is **thousands of small kernel launches**. On the **forward-compat** driver each launch pays an
+     extra per-launch cost; for **small** prefills (short trajectories → small `MAX_NEW_TOKENS`) that cost isn't
+     hidden behind compute → the GPU is launch-starved. Also DeepGEMM JIT-compiles **per GEMM shape** (M = prefill
+     length), and MoE routing varies per-expert M, so short/varied trajectories keep hitting new shapes → ~8 min
+     compile stalls (heartbeat freezes). **LONG/uniform trajectories** chunk to a constant **11264** compute-bound
+     prefill → launch overhead amortized + one dominant shape → 12–40k tok/s (verified). The rollout is unaffected
+     because it uses cuda-graph (per-launch cost paid once at capture).
+  **Fixes, cheapest first:** (a) long trajectories (compute-bound); (b) **`JIT_CACHE_DIR`** on a persistent mount
+  → compile cache survives runs+instances (baked, opt-in — see run_{teacher,rollout}.sh); (c)
+  `python3 -m sglang.compile_deep_gemm` AOT pre-compile → zero runtime JIT even cold; (d) a native **≥580 driver**
+  → removes the forward-compat launch tax entirely.
+
 ## Quick reference
 
 | what | value |
