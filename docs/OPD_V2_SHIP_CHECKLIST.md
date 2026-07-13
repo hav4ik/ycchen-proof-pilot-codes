@@ -64,7 +64,10 @@ before shipping, and prove no code/config commit is un-baked (§1).**
       c10d rendezvous, health gate) at 1/3 cost. See `beaker/README.md`.
 - [ ] `BEAKER_NODE_HOSTNAME` peer-routability confirmed on the target cluster (the launcher's one unverified
       assumption — the health gate fails fast if wrong).
-- [ ] B200 MoE backend chosen: `MOE_BACKEND=auto` (or `flashinfer_mxfp4`) — `marlin` is Hopper-only.
+- [ ] **B200 teacher MoE backend = `flashinfer_mxfp4`** (VALIDATED 2026-07-13, baked in `env_v33_b200.sh` `88dce35`).
+      DeepSeek-V4-Flash experts are fp4 → `auto`/`deep_gemm`/`flashinfer_trtllm` (all fp8 expert runners) CRASH on
+      sm_100; `flashinfer_mxfp4` is the fp4-native path (same precision as her Hopper marlin). One-time ~15min fp4
+      autotune on first launch (persisted). Rollout stays triton; trainer FA2. See `OPD_V2_H200_BRINGUP_FIXES.md`.
 - [ ] **Seed source reachable at startup.** `SEED_SOURCE` now defaults to the user-owned public mirror
       `chankhavu/ycchen-dsflash-proof-distill-v2-test` (byte-faithful copy of `ycchen/…`, deletion-proof).
       `build_seed` does a live `load_dataset` at pool init, so the node needs HF network (public → no

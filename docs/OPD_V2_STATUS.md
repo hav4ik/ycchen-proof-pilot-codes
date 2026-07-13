@@ -101,14 +101,32 @@ Integrated (branch `opd/flashinfer-sink`), correctness-**validated** (100/100, i
 bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype — flashinfer +9% on bf16 KV but
 **triton +10% on production fp8 KV**. Kept as opt-in fallback (`ATTENTION_BACKEND=flashinfer`). Not merged.
 
-## 6 · B200 (sm_100) BRING-UP — student side VALIDATED (2026-07-13)
+## 6 · B200 (sm_100) BRING-UP — ALL COMPONENTS VALIDATED (2026-07-13)
 
 - **Trainer FA2 sink on sm_100 — PASS.** `python /opt/opd/opd_v2_train_smoke.py` (bare `python` = `/opt/conda`
   cu128 trainer venv): fp64-exact sink correction, **bit-exact** OPD JSD loss+grad, fwd/sink/q-k-v-grad parity,
   `torch.compile` clean, doc-isolation 0. The FA2 wheel's sm_100 kernel is correct on Blackwell.
 - **Rollout on sm_100 — VALIDATED.** fp8 weights (flash_rl) + fp8-KV + triton sink → clean IMO-level Euclid proof
   via the chat endpoint on B200 (`finish_reason: stop`, correct reasoning + LaTeX). Also confirmed on H200
-  native-cuda-13.2. **Teacher (DeepSeek-V4-Flash, TP4) is the remaining component.**
+  native-cuda-13.2.
+- **Teacher (DeepSeek-V4-Flash) on sm_100 — VALIDATED** (`MOE_BACKEND=flashinfer_mxfp4`, TP4, 4×B200): clean Euclid
+  proof + **prefill throughput 40–45k tok/s** @ concurrency 8–16 (`bench_teacher_prefill.py`; matches/beats H200).
+  **Big finding — fp8 MoE for DeepSeek-V4 is UNSUPPORTED by design:** V4's experts are fp4 (only attn/router/dense
+  are fp8), so on sm_100 `auto`→triton crashes ("Hidden size mismatch"), and `deep_gemm` (swiglu/JIT-EP shape
+  guard) + `flashinfer_trtllm` (format_is_bypassed) also fail — all forcing fp8 kernels on fp4 weights (sglang
+  #25704/#23743). **`flashinfer_mxfp4` is the fp4-native Blackwell path — SAME precision as her Hopper marlin fp4
+  experts, NOT a downgrade** (she ran the teacher on Hopper/sglang-0.5.12.post1; Blackwell was new territory).
+  NVFP4 MoE support (PR #25820) is already in our 0.5.14 — **no sglang bump, no Hopper node, no model swap needed.**
+  Cost: one-time ~15min flashinfer fp4 **autotune** on first launch (the two "hangs" I called were the slow
+  autotune printing nothing between ~2:18 profiles — not hangs; retracted). `env_v33_b200.sh` defaults
+  `MOE_BACKEND=flashinfer_mxfp4` (commit `88dce35`).
+- **JIT/cache ops:** DeepGEMM/flashinfer JIT **compile** is portable (compiled by the image's baked cuda-13 toolkit
+  + sm_100 + TP4 — driver only affects loading, forward-compat handles it) → cache it to `JIT_CACHE_DIR`
+  (`/runs/jit_cache/sm100/{teacher,rollout}/`) and distribute (HF) to skip the ~10-20min cold compile. **Do NOT
+  ship the flashinfer autotune** (`…/flashinfer/autotune/`) — it's tuned to the warmup env's shapes; let each
+  deployment re-tune fresh. Robust baseline: a fixed shared-Weka `JIT_CACHE_DIR` → first replica compiles, all
+  reuse. Teacher/rollout both run TP4 (her `TEACHER_TP=4 TEACHERS_PER_NODE=2`), so a TP4 warm matches Ai2's 8-GPU
+  nodes (2×TP4 per node).
 - **⚠️ Serve-validation lesson (cost an afternoon):** validate the serve with `POST /v1/chat/completions`
   (`temperature:0`), NOT raw `/generate`. Raw completion on a reasoning/chat model is OOD → degenerate output
   (repetition, single-token collapse, `二十一th` language-switching) that *mimics* a hardware/driver bug. It is not.
@@ -120,11 +138,14 @@ bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype �
 
 ## 7 · OPEN ITEMS
 
-1. **Final drift-clean rebuild** before Ai2 handoff — bakes `8240b78` (test-harness venv fix) + anything else B200
-   surfaces; re-stamp the ship digest. (`451201a8` is valid now; its only un-baked commit is test-only.)
-2. **B200 teacher** (DeepSeek-V4-Flash, TP4 → needs 4×B200) + **Beaker 3-node smoke** (multi-node launcher) → full
-   64× V33. Student side (trainer FA2 + rollout) already green on sm_100.
-3. (Backlog) cu129 serve rebase — cleaner than cu130+forward-compat; not required (serve works native on cuda-13).
+1. **Final drift-clean rebuild** before Ai2 handoff — bakes `8240b78` (test-harness venv fix) + the B200 teacher
+   MoE config (`88dce35`) + the prefill bench (`99b2d03`); re-stamp the ship digest. (`451201a8` predates all three.)
+2. **Beaker 3-node smoke** (multi-node launcher: rank→role, hostname gather, cross-node c10d) → full 64× V33.
+   ALL single-node components are now green on sm_100 (trainer FA2, rollout, teacher). Fill the yaml placeholders;
+   set a fixed shared-Weka `JIT_CACHE_DIR`; teacher `MOE_BACKEND=flashinfer_mxfp4` is baked in `env_v33_b200.sh`.
+3. (Optional ops) HF-distribute the JIT-compile cache to pre-warm Ai2's first node (verify it key-hits on their
+   driver-570/cuda-12.8 — else the shared-Weka cache covers it).
+4. (Backlog) cu129 serve rebase — cleaner than cu130+forward-compat; not required (serve works native on cuda-13).
 
 ## Doc index (all under `docs/`, on `opd/b200-cu128`)
 `OPD_V2_STATUS.md` (this) · `OPD_V2_H200_BRINGUP_FIXES.md` (bugs #1–#10 + gotchas) · `OPD_V2_H200_SMOKE.md`

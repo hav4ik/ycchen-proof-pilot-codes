@@ -188,7 +188,30 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   endpoint on B200 (`finish_reason: stop`). Run the trainer smoke **directly** (bare `python` = the `/opt/conda`
   **cu128 trainer venv**); the `test_attention_sink.py -k fa2` wrapper mis-picks the cu130 *serve* venv on
   native-cuda-13 nodes (its `cuda==12.8` guard then trips) — harness fix in `8240b78`, pending next rebuild.
-  *Remaining B200 component: the DeepSeek-V4-Flash teacher (TP4).*
+
+- **⚠️ DeepSeek-V4-Flash TEACHER on B200 — fp8 MoE is UNSUPPORTED; use `flashinfer_mxfp4` (validated 2026-07-13).**
+  V4's **experts are fp4** (only attn/router/dense are fp8), so forcing an fp8 expert kernel on sm_100 fails four
+  ways: `auto`→triton `AssertionError: Hidden size mismatch`; `deep_gemm` `swiglu_limit requires
+  SGLANG_OPT_USE_JIT_EP_ACTIVATION=True` (the env IS True by default — a shape guard `N%4/G%4/D//8<E` at
+  `moe_runner/deep_gemm.py:874` disables JIT-EP for V4's E=256 experts, then the fallback can't do V4's clamped
+  swiglu → misleading message); `flashinfer_trtllm` `format_is_bypassed` assert. By design (sglang #25704, #23743) —
+  there is no "fp8 fixing version." **`MOE_BACKEND=flashinfer_mxfp4` serves correctly** (native
+  `/models/DeepSeek-V4-Flash`, TP4, 4×B200 → clean Euclid proof; prefill 40–45k tok/s @ conc 8–16). NVFP4 MoE
+  support (PR #25820) is already in **our 0.5.14** — no bump. **Faithful:** her teacher ran on Hopper (SIF sglang
+  0.5.12.post1, marlin) which *also* uses fp4 experts → flashinfer_mxfp4 on Blackwell is the **same fp4 precision**,
+  not a downgrade. Cost: one-time ~15min flashinfer **fp4 autotune** on first launch (prints nothing for ~2:18
+  between profiles → looks frozen; NOT hung — a "native-cuda-13 broken / bump sglang / Hopper node" detour was
+  chased and retracted). Baked: `env_v33_b200.sh` defaults `MOE_BACKEND=flashinfer_mxfp4` (commit `88dce35`).
+  Teacher is prefill-only (`/score`); measure with `docker/cu128/tests/bench_teacher_prefill.py`, NOT sglang's
+  idle-polluted per-chunk `input throughput` or decode tok/s.
+- **JIT compile vs flashinfer autotune (cache strategy).** The DeepGEMM/flashinfer/triton **JIT compile** (~10-20min
+  cold) is shape-parametrized on model+arch+TP and **portable** (compiled by the image's baked cuda-13 toolkit; the
+  driver only affects loading → cuda-12.8 forward-compat loads the same cubins) — cache to `JIT_CACHE_DIR`
+  (`<dir>/sm100/{teacher,rollout}/{deep_gemm,triton,flashinfer,tvm-ffi}`), safe to distribute (HF) across B200
+  nodes/drivers. The flashinfer **autotune** (`…/flashinfer/autotune/*.json`, `SGLANG_FLASHINFER_AUTOTUNE_CACHE=True`
+  default) is tuned to the warmup env's shapes → **do NOT distribute; re-tune per deployment.** Robust baseline:
+  fixed shared-Weka `JIT_CACHE_DIR` → first replica compiles, all reuse. Warm at production TP (TP4; her
+  `TEACHERS_PER_NODE=2` → an 8-GPU node runs 2×TP4, matching a 4×B200 TP4 warm).
 - **`Scale param shape … not divisible by 3` during weight-sync is BENIGN.** It's her loader (identical at
   `flash_rl/patches/loader.py:1087` / overlay `:1141`): the fused qkv scale dim isn't a clean 3× multiple
   because GQA makes q/k/v different sizes. The `rows_per_shard = dim//3` estimate that triggers the warning
