@@ -33,7 +33,9 @@ export TEACHER_CONTEXT_LEN=150000 TEACHER_MEMFRAC=0.6 TEACHER_MAXRUN=16
 # NOT a downgrade. First launch does a one-time ~15min flashinfer fp4 autotune (looks frozen between
 # ~2:18 profiles — it's warming, not hung); persisted via JIT_CACHE_DIR. NVFP4 support (#25820) is
 # already in 0.5.14 — no sglang bump needed.
-export MOE_BACKEND=${MOE_BACKEND:-flashinfer_mxfp4}
+# MoE backend is AUTO-DETECTED in run_teacher.sh (compute_cap major==10 = Blackwell sm_10x = B200/B300 ->
+# flashinfer_mxfp4; else auto -> marlin on Hopper). So this env does NOT set MOE_BACKEND, and a b300 wrapper
+# that sources this stays thin. Force a specific one with:  export MOE_BACKEND=<backend>
 #   export MAX_PREFILL_TOKENS=8192              # only if the FlashMLA mixed decode+prefill crash appears (#23743)
 #   add --disable-flashinfer-autotune to run_teacher.sh for a ~1-2min cold start (skips the tune; slightly slower kernels)
 

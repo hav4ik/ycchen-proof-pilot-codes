@@ -65,13 +65,19 @@ TP="${TP:-4}"; PORT=8100
 while [ $# -gt 0 ]; do case "$1" in --tp) TP="$2"; shift 2;; --port) PORT="$2"; shift 2;; *) shift;; esac; done
 
 SPOOL="${SPOOL:-/dev/shm/opd-v2-teacher-spool}"; mkdir -p "$SPOOL"
-# MoE backend: default "auto" -> Hopper auto resolves to marlin (== her V33, fp4 experts). On BLACKWELL
-# (sm_100) auto is WRONG: DeepSeek-V4-Flash experts are fp4, but auto picks the fp8 triton runner ->
-# "Hidden size mismatch" crash (deep_gemm/flashinfer_trtllm fp8 paths also fail; fp8 MoE for V4 is
-# unsupported by design). Set MOE_BACKEND=flashinfer_mxfp4 on B200 (fp4-native, validated 2026-07-13,
-# same precision as her marlin fp4). env_v33_b200.sh sets this. One-time ~15min fp4 autotune on first
-# launch (persisted via JIT_CACHE_DIR); add --disable-flashinfer-autotune below for a fast cold start.
-MOE_BACKEND="${MOE_BACKEND:-auto}"
+# MoE backend: sglang `auto` MIS-picks on sm_100 for DeepSeek-V4 (experts are fp4 -> auto's fp8 triton
+# runner CRASHES "Hidden size mismatch"; deep_gemm/flashinfer_trtllm fp8 paths also fail — fp8 MoE for V4
+# is unsupported by design, sglang #25704/#23743). So AUTO-DETECT the arch and pick the right fp4 backend:
+#   sm_100 (Blackwell B200/GB200) -> flashinfer_mxfp4  (fp4-native; validated 2026-07-13, clean proof + 40-45k
+#                                     tok/s prefill; SAME precision as her Hopper marlin fp4 experts)
+#   else (Hopper etc.)            -> auto               (-> marlin = her V33)
+# This IMPLEMENTS her per-hardware intent that sglang's own `auto` gets wrong on sm_100. Override MOE_BACKEND
+# to force any backend. One-time ~15min flashinfer fp4 autotune on first launch (add --disable-flashinfer-autotune
+# below for a fast cold start; the JIT compile persists via JIT_CACHE_DIR).
+if [ -z "${MOE_BACKEND:-}" ]; then
+  _ccmaj=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
+  if [ "${_ccmaj:-0}" = "10" ]; then MOE_BACKEND=flashinfer_mxfp4; else MOE_BACKEND=auto; fi
+fi
 ATTN_ARGS=(); [ -n "${ATTN_BACKEND:-}" ] && ATTN_ARGS+=(--attention-backend "$ATTN_BACKEND")
 # B200: sglang #23743's FlashMLA mixed decode+multi-prefill crash — set MAX_PREFILL_TOKENS=8192 to avoid it.
 PREFILL_ARGS=(); [ -n "${MAX_PREFILL_TOKENS:-}" ] && PREFILL_ARGS+=(--max-prefill-tokens "$MAX_PREFILL_TOKENS")
