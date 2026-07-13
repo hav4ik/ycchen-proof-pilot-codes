@@ -19,9 +19,10 @@ though they're on GitHub. Concretely:
 **Rule (non-negotiable): rebuild the ship image from the current `opd/b200-cu128` HEAD as the LAST step
 before shipping, and prove no code/config commit is un-baked (§1).**
 
-> ✅ **RESOLVED (2026-07-13):** the ship image was rebuilt from `94efb6c` → **`sha256:451201a8…`**, baking
-> `faf4c62` (+ the seed mirror). Drift check `git log 94efb6c..HEAD -- docker/ training/ '*.sh' '*.py'` is
-> **empty**, and both fixes were spot-checked *inside the container*. `451201a8` is the image that ships.
+> ✅ **RESOLVED (2026-07-13):** rebuilt from HEAD as fixes landed — `451201a8`@`94efb6c` (baked `faf4c62`),
+> then the **final `sha256:4c0d4276…`@`c873ab5`** (baked the B200 teacher `flashinfer_mxfp4` auto-detect +
+> harness fix). Drift check `git log c873ab5..HEAD -- docker/ training/ '*.sh' '*.py'` is **empty**; fixes
+> spot-checked *inside the container*. **`4c0d4276` is the image that ships.**
 
 ## §1 — Image is complete (no drift)
 
@@ -113,16 +114,15 @@ before shipping, and prove no code/config commit is un-baked (§1).**
 
 | image | built at | functional commits missing | mitigation |
 |---|---|---|---|
-| **`cu128 @ 451201a8`** (SHIP) | **`94efb6c`** | **none** — drift-clean | none needed; this is the image for Ai2 |
-| `cu128 @ 5e3ba5f6` (superseded) | `74c1dac` | `faf4c62` (agentic auto-scale) | replaced by `451201a8`; do NOT ship |
+| **`cu128 @ 4c0d4276`** (SHIP) | **`c873ab5`** | **none** — drift-clean | none needed; this is the image for Ai2 |
+| `cu128 @ 451201a8` (intermediate) | `94efb6c` | B200 teacher MoE (`88dce35`/`c873ab5`/`8240b78`) | replaced by `4c0d4276`; do NOT ship |
+| `cu128 @ 5e3ba5f6` (superseded) | `74c1dac` | `faf4c62` (agentic auto-scale) | replaced by `4c0d4276`; do NOT ship |
 | `cu128-flashinfer-sink @ 30994b4d` | `321aff6` | `faf4c62` + seed mirror | not shipped to Ai2 (triton is production); rebuild that branch if ever needed |
 
 > **Ship rule of thumb:** the number that goes to Ai2 is the digest of an image built from a commit where
 > `git log <that-commit>..HEAD -- docker/ training/ *.sh *.py` is **empty**. If it's not empty, rebuild.
 
-> ⏳ **PENDING FINAL REBUILD (B200 bring-up):** `451201a8` (built @`94efb6c`) is missing `8240b78`
-> (`test_attention_sink.py` venv-order fix — **test-only**, does not affect training; production `run_*`
-> scripts already invoke the trainer python directly, and Ai2's cuda-12.8 B200 selects the venv correctly
-> anyway). B200 component testing may surface more small fixes — **batch them into one final drift-clean
-> rebuild before the Ai2 handoff**, then re-stamp the digest here. `451201a8` remains valid for B200 testing
-> (use `python /opt/opd/opd_v2_train_smoke.py` directly instead of the `-k fa2` harness on native-cuda-13 nodes).
+> ✅ **FINAL REBUILD DONE (2026-07-13):** all B200 bring-up fixes are baked into **`4c0d4276`@`c873ab5`** —
+> `8240b78` (harness venv order), `88dce35` (env teacher MoE), `99b2d03` (prefill bench), and `c873ab5`
+> (`run_teacher.sh` auto-detects `flashinfer_mxfp4` on sm_100 so the teacher needs no manual override). Drift
+> check `c873ab5..HEAD` empty. **`4c0d4276` is the drift-clean ship image.**

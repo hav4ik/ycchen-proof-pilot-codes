@@ -10,8 +10,8 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   target). GPUs run *inside* the image container (no host `docker run` wrapper).
 - **Image:** `chankhavu/ycchen-opd:cu128` — base/**trainer** venv is genuine cu128 (torch 2.10); the
   **serve** venv (sglang) is cu130 (see fix #1). Current SHIP digest (fixes #1–#10 + JIT_CACHE_DIR + `faf4c62`
-  agentic auto-scale + seed mirror; built at `94efb6c`, drift-clean):
-  `sha256:451201a83fb4fdeae25a52fc387c3420000dc84fbd27565c12a1b145629bd5bd`.
+  + seed mirror + **B200 teacher `flashinfer_mxfp4` auto-detect** + harness fix; built at `c873ab5`, drift-clean):
+  `sha256:4c0d4276dc45fe21877dc0d6d028887f4c8a6d91ae91e102eb90c262b3726222`.
 
 ## Fix #1 — serve stack is CUDA-13; driver 570 is CUDA-12.8 → forward-compat
 
