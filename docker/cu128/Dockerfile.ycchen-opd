@@ -56,6 +56,16 @@ RUN set -eux; \
 ENV CUDA_HOME=/usr/local/cuda-12.8 \
     PATH=/usr/local/cuda-12.8/bin:${PATH}
 
+# CUDA-13 toolkit for the SERVE venv's JIT. sglang 0.5.14 is CUDA-13 and JIT-compiles kernels at runtime
+# (e.g. DeepSeek-V4 topk) that use CUDA-13 `cuda::ptx::*` intrinsics (mbarrier_*/cp_async_bulk); compiling
+# them with the 12.8 nvcc/CCCL fails on signature mismatches. run_{teacher,rollout,teacher_olmo3}.sh set
+# CUDA_HOME=/usr/local/cuda-13.0 so the serve JIT uses this toolkit; the base/trainer venv stays cu128.
+RUN set -eux; \
+    apt-get update; apt-get install -y --no-install-recommends \
+      cuda-nvcc-13-0 cuda-cudart-dev-13-0 cuda-cccl-13-0; \
+    rm -rf /var/lib/apt/lists/*; \
+    /usr/local/cuda-13.0/bin/nvcc --version | grep release
+
 # opd_v2 runtime deps (trainer + orchestrator). torch/flash_attn already in base.
 # transformers is PINNED to Yi-Chia's 5.9.0: the base ships 5.13.0, which broke olmo3_sink's rope
 # (transformers changed the Olmo3 rope_parameters API between 5.9 and 5.13 — verified in-container).

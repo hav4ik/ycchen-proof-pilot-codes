@@ -17,6 +17,13 @@
 #   CUDA_VISIBLE_DEVICES=3 ./run_teacher.sh --tp 1 --port 8100
 set -euo pipefail
 
+# --- serve venv is CUDA-13 (sglang 0.5.14): use the CUDA-13 nvcc/CCCL for its runtime JIT kernels -----
+# The base image defaults CUDA_HOME to cu128, but sglang JIT-compiles kernels (DeepSeek-V4 topk etc.)
+# that use CUDA-13 cuda::ptx intrinsics -> point it at the CUDA-13 toolkit baked in the image (the
+# base/trainer venv stays cu128).
+export CUDA_HOME=/usr/local/cuda-13.0 CUDA_PATH=/usr/local/cuda-13.0
+export PATH=/usr/local/cuda-13.0/bin:${PATH}
+
 # --- CUDA-13 forward-compat (see Dockerfile cuda13compat stage) --------------------------------------
 # sglang 0.5.14 is a CUDA-13 build and can't be pinned to cu128 (sgl-project/sglang#25069). If this
 # node's driver predates CUDA 13, load the baked forward-compat libcuda so the serve stack runs on
