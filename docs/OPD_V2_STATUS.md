@@ -61,7 +61,10 @@ Operational gotchas (also in the bring-up doc):
 
 **Loop status:** validated on H200 — rollout(fp8/triton-sink/cuda-graph/SWA/fp8-KV) → teacher `/score`
 hidden-extract → reverse-KL/JSD → FSDP2 step → **weight-sync** (wv ticks) → **checkpoint** (DCP + HF) →
-**resume**. `single_round` green through weight-sync + step 1–2; `agentic` (real producer) acceptance in progress.
+**resume**. **BOTH producers green:** `single_round` (loss 0.0948, wv 1–2) AND `agentic` (real producer, dsflash
+seed) — agentic on `5e3ba5f6` with the `AGENTIC_MAX_PROMPT_TOKENS=28672` override: step1 loss 0.1191 → step2
+0.0908, eos 100%, fail=0, rKL 0.10, weight-sync wv=1,2 (~58s). `starved_frac` high on 1-node (agentic producer
+slower); inverts in prod (4 rollout nodes, WSYNC=4). **H200 functional acceptance CLOSED.**
 
 ## 3 · BEAKER CONFIG (`docker/cu128/launch/`, on `opd/b200-cu128`)
 
