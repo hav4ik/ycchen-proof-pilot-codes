@@ -1215,7 +1215,21 @@ class QuantizedRLModelLoader(DefaultModelLoader):
                 ):
                     logger.info(f"[QuantizedRL] Skip: {name} ({weight.dtype})")
                     yield (name, weight)
-                elif weight.dtype in [torch.bfloat16, torch.float32, torch.float16]:
+                elif (
+                    weight.dim() >= 2
+                    and weight.dtype in [torch.bfloat16, torch.float32, torch.float16]
+                ):
+                    # proof-pilot patch (2 fixes vs stock flash_rl, ported from
+                    # training/opd_v2/flash_rl/patches/loader.py):
+                    #  1) update_weights_from_disk yields CPU tensors, but
+                    #     per_token_group_quant_fp8 is a CUDA-only fused kernel
+                    #     -> move to the current device before quantizing.
+                    #  2) stock SKIP_QUANTIZATION_PARAMS misses Olmo2/Olmo3 norms
+                    #     (q_norm/k_norm/post_feedforward_layernorm), which are 1-D
+                    #     and crash the 2-D quant kernel. Restrict quant to >=2-D
+                    #     weights so any 1-D param falls through to the keep branch.
+                    if not weight.is_cuda:
+                        weight = weight.to(device=torch.cuda.current_device())
                     qweight, scale = per_token_group_quant_fp8(weight, weight.shape[-1])
                     logger.info(f"[QuantizedRL] Quantize: {name} {weight.dtype}→FP8")
                     QuantizedRLModelLoader._store_quantized_scale(
