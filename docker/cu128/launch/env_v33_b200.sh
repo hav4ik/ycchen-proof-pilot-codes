@@ -24,11 +24,18 @@ export TARGET_INFLIGHT=512 STARVE_TIMEOUT=7200 DROP_FINISH_REASONS=length
 
 # ---- teacher: score window > max_traj so it never length-fails ----
 export TEACHER_CONTEXT_LEN=150000 TEACHER_MEMFRAC=0.6 TEACHER_MAXRUN=16
-# B200 MoE backend: run_teacher.sh defaults MOE_BACKEND=auto -> sglang picks per hardware (marlin on
-# Hopper = her V33; a Blackwell backend on sm_100). DeepSeek-V4-Flash TP4 is confirmed to run on a
-# GB200 node (sglang #23743). Overrides IF auto/first run misbehaves on B200:
-#   export MOE_BACKEND=flashinfer_mxfp4     # the backend validated for DSv4-Flash on GB200 (#23743)
-#   export MAX_PREFILL_TOKENS=8192          # only if the FlashMLA mixed decode+prefill crash appears
+# B200 MoE backend (REQUIRED on sm_100 — validated 2026-07-13 on 4xB200 TP4, clean Euclid proof).
+# DeepSeek-V4-Flash stores its EXPERTS IN FP4 (only attn/router/dense are fp8). On Blackwell `auto`
+# mis-resolves to the fp8 triton MoE runner, which CRASHES ("Hidden size mismatch"); deep_gemm
+# (swiglu_limit/JIT-EP shape guard) and flashinfer_trtllm (format_is_bypassed) also fail — all are
+# fp8 expert runners vs fp4-packed weights (fp8 MoE for V4 is unsupported by design, sglang #25704/#23743).
+# flashinfer_mxfp4 is the fp4-NATIVE Blackwell path — SAME precision as her Hopper marlin fp4 experts,
+# NOT a downgrade. First launch does a one-time ~15min flashinfer fp4 autotune (looks frozen between
+# ~2:18 profiles — it's warming, not hung); persisted via JIT_CACHE_DIR. NVFP4 support (#25820) is
+# already in 0.5.14 — no sglang bump needed.
+export MOE_BACKEND=${MOE_BACKEND:-flashinfer_mxfp4}
+#   export MAX_PREFILL_TOKENS=8192              # only if the FlashMLA mixed decode+prefill crash appears (#23743)
+#   add --disable-flashinfer-autotune to run_teacher.sh for a ~1-2min cold start (skips the tune; slightly slower kernels)
 
 # ---- trainer: 32B @140k -> CPU offload, HSDP ----
 export MICRO=131072 CHUNK_SIZE=2048 CPU_OFFLOAD=1 TRAIN_BATCH_TRAJS=64

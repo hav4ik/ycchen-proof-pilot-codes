@@ -65,9 +65,12 @@ TP="${TP:-4}"; PORT=8100
 while [ $# -gt 0 ]; do case "$1" in --tp) TP="$2"; shift 2;; --port) PORT="$2"; shift 2;; *) shift;; esac; done
 
 SPOOL="${SPOOL:-/dev/shm/opd-v2-teacher-spool}"; mkdir -p "$SPOOL"
-# MoE backend: default "auto" -> sglang picks per hardware. On Hopper auto resolves to marlin (== her V33);
-# on Blackwell/B200 it picks a supported backend. If auto's B200 pick misbehaves, override with
-# MOE_BACKEND=flashinfer_mxfp4 (validated for DeepSeek-V4-Flash on GB200 — sglang issue #23743).
+# MoE backend: default "auto" -> Hopper auto resolves to marlin (== her V33, fp4 experts). On BLACKWELL
+# (sm_100) auto is WRONG: DeepSeek-V4-Flash experts are fp4, but auto picks the fp8 triton runner ->
+# "Hidden size mismatch" crash (deep_gemm/flashinfer_trtllm fp8 paths also fail; fp8 MoE for V4 is
+# unsupported by design). Set MOE_BACKEND=flashinfer_mxfp4 on B200 (fp4-native, validated 2026-07-13,
+# same precision as her marlin fp4). env_v33_b200.sh sets this. One-time ~15min fp4 autotune on first
+# launch (persisted via JIT_CACHE_DIR); add --disable-flashinfer-autotune below for a fast cold start.
 MOE_BACKEND="${MOE_BACKEND:-auto}"
 ATTN_ARGS=(); [ -n "${ATTN_BACKEND:-}" ] && ATTN_ARGS+=(--attention-backend "$ATTN_BACKEND")
 # B200: sglang #23743's FlashMLA mixed decode+multi-prefill crash — set MAX_PREFILL_TOKENS=8192 to avoid it.
