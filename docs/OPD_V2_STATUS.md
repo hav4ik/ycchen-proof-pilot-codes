@@ -101,13 +101,14 @@ Integrated (branch `opd/flashinfer-sink`), correctness-**validated** (100/100, i
 bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype — flashinfer +9% on bf16 KV but
 **triton +10% on production fp8 KV**. Kept as opt-in fallback (`ATTENTION_BACKEND=flashinfer`). Not merged.
 
-## 6 · B200 (sm_100) BRING-UP — trainer validated, rollout in progress (2026-07-13)
+## 6 · B200 (sm_100) BRING-UP — student side VALIDATED (2026-07-13)
 
 - **Trainer FA2 sink on sm_100 — PASS.** `python /opt/opd/opd_v2_train_smoke.py` (bare `python` = `/opt/conda`
   cu128 trainer venv): fp64-exact sink correction, **bit-exact** OPD JSD loss+grad, fwd/sink/q-k-v-grad parity,
   `torch.compile` clean, doc-isolation 0. The FA2 wheel's sm_100 kernel is correct on Blackwell.
-- **Rollout serve stack + prompt-format — validated on H200 native-cuda-13.2** (clean chat-endpoint Euclid proof).
-  **B200 rollout chat-endpoint validation PENDING** (in progress).
+- **Rollout on sm_100 — VALIDATED.** fp8 weights (flash_rl) + fp8-KV + triton sink → clean IMO-level Euclid proof
+  via the chat endpoint on B200 (`finish_reason: stop`, correct reasoning + LaTeX). Also confirmed on H200
+  native-cuda-13.2. **Teacher (DeepSeek-V4-Flash, TP4) is the remaining component.**
 - **⚠️ Serve-validation lesson (cost an afternoon):** validate the serve with `POST /v1/chat/completions`
   (`temperature:0`), NOT raw `/generate`. Raw completion on a reasoning/chat model is OOD → degenerate output
   (repetition, single-token collapse, `二十一th` language-switching) that *mimics* a hardware/driver bug. It is not.

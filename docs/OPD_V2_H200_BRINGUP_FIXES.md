@@ -177,17 +177,18 @@ CUDA 12.8)** instance, and how each was fixed. Each failure was *further down th
   vs sm_90; native cuda-13 vs cuda-12.8 forward-compat), and we nearly committed a "native cuda-13 serve is broken,
   require a driver-570 node" theory + burned three rentals on it. It was **sampling noise on OOD input** — on the
   **H200 whose raw `/generate` had collapsed (driver 595, native cuda-13.2)**, the chat endpoint returns a correct
-  Euclid proof. So serve correctness is a **prompt-format** issue, not a driver/arch one (broader confirmation —
-  the B200 chat endpoint — was in progress at time of writing). Always reproduce a suspected serve bug through the
-  chat endpoint before blaming the stack.
+  Euclid proof. So serve correctness is a **prompt-format** issue, not a driver/arch one (confirmed on **B200 sm_100**
+  too: clean chat-endpoint proof). Always reproduce a suspected serve bug through the chat endpoint before blaming
+  the stack.
 
-- **B200 (sm_100) bring-up (2026-07-13).** *Trainer FA2 sink — VALIDATED:* `python /opt/opd/opd_v2_train_smoke.py`
+- **B200 (sm_100) student side — VALIDATED (2026-07-13).** *Trainer FA2 sink:* `python /opt/opd/opd_v2_train_smoke.py`
   → PASS (fp64-exact sink correction, **bit-exact** OPD JSD loss+grad, forward/sink-grad/q-k-v-grad parity within
   bf16 tol, `torch.compile(fullgraph=True)` clean, packed doc-isolation 0 leak) — the FA2 wheel's **sm_100** kernel
-  is correct. *Rollout — serve stack + prompt-format proven on H200 native-cuda-13.2 (clean chat-endpoint proof);
-  the **B200 rollout chat-endpoint validation is PENDING.*** Run the trainer smoke **directly** (bare `python` =
-  the `/opt/conda` **cu128 trainer venv**); the `test_attention_sink.py -k fa2` wrapper mis-picks the cu130 *serve*
-  venv on native-cuda-13 nodes (its `cuda==12.8` guard then trips) — harness fix in `8240b78`, pending next rebuild.
+  is correct. *Rollout:* fp8 weights (flash_rl) + fp8-KV + triton sink → clean IMO-level Euclid proof via the chat
+  endpoint on B200 (`finish_reason: stop`). Run the trainer smoke **directly** (bare `python` = the `/opt/conda`
+  **cu128 trainer venv**); the `test_attention_sink.py -k fa2` wrapper mis-picks the cu130 *serve* venv on
+  native-cuda-13 nodes (its `cuda==12.8` guard then trips) — harness fix in `8240b78`, pending next rebuild.
+  *Remaining B200 component: the DeepSeek-V4-Flash teacher (TP4).*
 - **`Scale param shape … not divisible by 3` during weight-sync is BENIGN.** It's her loader (identical at
   `flash_rl/patches/loader.py:1087` / overlay `:1141`): the fused qkv scale dim isn't a clean 3× multiple
   because GQA makes q/k/v different sizes. The `rows_per_shard = dim//3` estimate that triggers the warning
