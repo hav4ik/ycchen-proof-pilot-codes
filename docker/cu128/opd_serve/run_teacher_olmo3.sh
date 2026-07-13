@@ -52,7 +52,7 @@ export MALLOC_ARENA_MAX=4 \
        OPD_SCORE_TOP1_CHUNK="${OPD_SCORE_TOP1_CHUNK:-1024}" \
        PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-exec "$SERVE_PY" -m sglang.launch_server \
+exec "$SERVE_PY" -m sglang.launch_server --skip-server-warmup \
   --model-path "$MODEL" --tp-size "$TP" --host 0.0.0.0 --port "$PORT" \
   "${DIST_ARGS[@]}" \
   --attention-backend "$ATTENTION_BACKEND" \

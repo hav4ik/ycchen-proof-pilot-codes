@@ -63,7 +63,7 @@ export SGLANG_DSV4_HIDDEN_POST_NORM=1 \
        OPD_TEACHER_MODEL_PATH="$MODEL" \
        OPD_SCORE_TOP1_CHUNK="${OPD_SCORE_TOP1_CHUNK:-1024}"
 
-exec "$SERVE_PY" -m sglang.launch_server \
+exec "$SERVE_PY" -m sglang.launch_server --skip-server-warmup \
   --model-path "$MODEL" --tp-size "$TP" --host 0.0.0.0 --port "$PORT" \
   "${DIST_ARGS[@]}" "${ATTN_ARGS[@]}" "${PREFILL_ARGS[@]}" \
   --enable-return-hidden-states --disable-radix-cache \

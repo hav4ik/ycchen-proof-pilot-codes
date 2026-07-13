@@ -108,6 +108,11 @@ ENV OPD_REPO=/opt/opd/repo \
     OLMO_CORE_DIR=/opt/opd/OLMo-core
 COPY . ${OPD_REPO}
 COPY docker/cu128/opd_v2_train_smoke.py docker/cu128/test_attention_sink.py /opt/opd/
+# The vendored opd loader (training/_vendor_opd/opd/prompts.py) resolves the prover-template dir by going
+# up 4 levels from its own file -> /opt/opd/distill_gen/prompts (correct in her flat repo layout, but the
+# vendor lives one level deeper here, so it lands at /opt/opd instead of /opt/opd/repo). Symlink so
+# single_round's ProblemPromptLoader finds distill_gen/prompts/*.txt.
+RUN ln -sfn ${OPD_REPO}/distill_gen /opt/opd/distill_gen
 
 # import sanity at build time (no GPU): model registers, config loads (FA3 import is lazy/optional).
 RUN python - <<'PY'
