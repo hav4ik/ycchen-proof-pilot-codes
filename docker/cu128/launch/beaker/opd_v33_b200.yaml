@@ -52,6 +52,10 @@ tasks:
         value: "<PLACEHOLDER: /models/student-deploy>"
       - name: STUDENT_DEPLOY_PATH                   # deploy dir used by weight-sync saves — see README (may need WRITABLE)
         value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: JIT_CACHE_DIR                         # persistent compile cache -> skips the ~8-min/shape cold DeepGEMM warm
+        value: "<PLACEHOLDER: /weka/run/jit_cache>" # a FIXED shared path (NOT under the per-run RUN_DIR) on the same Weka
+                                                    # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
+                                                    # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
 
       # ---- B200 NCCL fabric (per beaker-docs distributed-training; confirm for the target cluster) ----
       - name: NCCL_SOCKET_IFNAME
