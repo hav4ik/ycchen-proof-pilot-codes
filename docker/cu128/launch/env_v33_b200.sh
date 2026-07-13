@@ -12,10 +12,13 @@ export SEED_HF_CONFIG=${SEED_HF_CONFIG:-per_problem}
 export ATTN_IMPL=olmo3_sink_fa2          # cu128 delta #1: B200 has no FA3 -> post-correction sink on stock FA2
 # (cu128 delta #2 is the rollout attention backend = triton, already the default in run_rollout.sh)
 
-# ---- topology (her V33): 1 teacher(TP4x2) + 4 rollout(TP4x2 fp8 = 8 replicas) + 3 trainer(world 24) ----
-export TEACHER_NNODES=1 TEACHER_TP=4 TEACHERS_PER_NODE=2
-export ROLLOUT_NNODES=4 ROLLOUT_TP=4 ROLLOUTS_PER_NODE=2
-# trainer = remaining nodes (run_mn_cu128.sh computes it; 8 total -> 3 trainer nodes -> world 24)
+# ---- topology (her V33 default): 1 teacher(TP4x2) + 4 rollout(TP4x2 fp8 = 8 replicas) + 3 trainer(world 24) ----
+# Overridable per-run (defaults = her V33). Trainer = total_nodes - teacher - rollout (launcher computes it), so
+# ROLLOUT_NNODES is the ONE knob for the balance: 4 -> 1+4+3 (V33, trainer-heavy = her optimized); 5 -> 1+5+2
+# (her pre-V33 fallback, rollout-heavy). BOTH are memory-safe (HSDP shards within-node at 8, so the trainer count
+# doesn't change per-GPU memory). Start V33, watch starved_frac; if it spikes (rollout-bound), set ROLLOUT_NNODES=5.
+export TEACHER_NNODES=${TEACHER_NNODES:-1} TEACHER_TP=${TEACHER_TP:-4} TEACHERS_PER_NODE=${TEACHERS_PER_NODE:-2}
+export ROLLOUT_NNODES=${ROLLOUT_NNODES:-4} ROLLOUT_TP=${ROLLOUT_TP:-4} ROLLOUTS_PER_NODE=${ROLLOUTS_PER_NODE:-2}
 
 # ---- rollout: 140k long-context, fp8 KV, hybrid SWA ----
 export CONTEXT_LEN=130816 KV_CACHE_DTYPE=fp8_e4m3 SWA_RATIO=0.2 ROLLOUT_MAXRUN=64 MEMFRAC=0.82

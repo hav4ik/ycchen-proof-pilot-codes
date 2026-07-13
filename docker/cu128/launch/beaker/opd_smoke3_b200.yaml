@@ -1,0 +1,100 @@
+# OPD v2 — 3-NODE MULTI-NODE SMOKE on 3x B200 (24 GPU) as a Beaker replicated batch job.
+# =============================== DRAFT — human review required ================================
+# Purpose: exercise the NEW multi-node launcher code (rank->role, shared-FS hostname gather, cross-node
+# c10d rendezvous, health gate) at 1/3 the cost of the full 8-node run, BEFORE 64x B200. It runs the real
+# 4-process loop (teacher /score + rollout + trainer + orchestrator) but scaled down: 1+1+1 nodes, agentic
+# floor context (57k), small batch, 20 steps. Green here de-risks the launcher for opd_v33_b200.yaml.
+#
+# Fill EVERY "<PLACEHOLDER: ...>" (same site-specifics as opd_v33_b200.yaml). Submit:
+#   beaker experiment create docker/cu128/launch/beaker/opd_smoke3_b200.yaml
+# ==============================================================================================
+#
+# Topology (3 replicas): rank 0 = teacher (TP4x2) | rank 1 = rollout (TP4x2 fp8) | rank 2 = trainer
+# (FSDP2 world 8, HSDP replicate1 x shard8) + orchestrator. Set by the command's TEACHER_NNODES=1
+# ROLLOUT_NNODES=1 overrides (trainer = 3 - 1 - 1 = 1).
+
+version: v2
+budget: "<PLACEHOLDER: ai2/your-budget>"
+description: "OPD v2 3-node multi-node launcher smoke (1+1+1 on 24x B200, 20 steps)"
+retry:
+  allowedTaskRetries: 1
+
+tasks:
+  - name: opd-smoke3-b200
+    replicas: 3                                     # 1 teacher + 1 rollout + 1 trainer = 3 nodes
+    leaderSelection: true                           # BEAKER_LEADER_REPLICA_HOSTNAME (needs replicas>=2 + hostNetworking)
+    hostNetworking: true                            # replicas reach each other by hostname; required for IB/NCCL
+    propagateFailure: true
+    propagatePreemption: true
+    synchronizedStartTimeout: 20m
+
+    image:
+      docker: chankhavu/ycchen-opd:cu128@sha256:4c0d4276dc45fe21877dc0d6d028887f4c8a6d91ae91e102eb90c262b3726222
+      # ^ same pinned SHIP digest as the full run (teacher auto-detects flashinfer_mxfp4 on B200). UPDATE on rebuild.
+
+    # env_v33_b200.sh sets her V33 knobs; the inline overrides scale it to a 3-node/20-step smoke.
+    command: ["bash", "-lc",
+      "source /opt/opd/launch/env_v33_b200.sh && \
+       TEACHER_NNODES=1 ROLLOUT_NNODES=1 \
+       CONTEXT_LEN=57344 MAX_TRAJ_TOKENS=57344 MICRO=57344 MAX_NEW_TOKENS=49152 \
+       REFINE_BUNDLE_CAP=8000 SELECT_BUNDLE_CAP=8000 \
+       TRAIN_BATCH_TRAJS=8 WEIGHT_SYNC_EVERY=1 MAX_STEPS=20 CHECKPOINT_EVERY=0 \
+       RUN_NAME=opd_smoke3_b200 WANDB_PROJECT=opd-v2-smoke \
+       bash /opt/opd/launch/run_mn_beaker.sh"]
+
+    envVars:
+      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below
+        value: "<PLACEHOLDER: /weka/run/opd_smoke3_b200>"
+      - name: DEEPSEEK_V4_FLASH
+        value: "<PLACEHOLDER: /models/DeepSeek-V4-Flash>"
+      - name: STUDENT_PATH
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: ROLLOUT_MODEL
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: STUDENT_DEPLOY_PATH
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: JIT_CACHE_DIR                         # fixed shared path (NOT under RUN_DIR) so it persists across runs
+        value: "<PLACEHOLDER: /weka/run/jit_cache>"
+      - name: NCCL_SOCKET_IFNAME
+        value: "<PLACEHOLDER: ib>"
+      - name: NCCL_IB_HCA
+        value: "<PLACEHOLDER: ^=mlx5_bond_0>"
+      # WANDB_API_KEY is a BLOCKED literal name — use a Beaker secret:
+      # - name: WANDB_API_KEY
+      #   secret: "<PLACEHOLDER: wandb-api-key>"
+
+    datasets:
+      - mountPath: /weka/run
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: opd/run>"
+      - mountPath: /models/DeepSeek-V4-Flash
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"
+      - mountPath: /models/student-deploy
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
+
+    resources:
+      gpuCount: 8                                   # whole 8-GPU B200 node per replica
+      sharedMemory: "<PLACEHOLDER: 128GiB>"         # teacher hidden spool lives in /dev/shm
+
+    context:
+      priority: "<PLACEHOLDER: high>"
+
+    constraints:
+      cluster:
+        - "<PLACEHOLDER: ai2/your-b200-cluster>"
+
+    timeout: "<PLACEHOLDER: 6h>"
+
+# ---- What "green" looks like (watch $RUN_DIR/launch_rank*.log + orchestrator.log) ----
+#   1. all 3 replicas publish their BEAKER_NODE_HOSTNAME to $RUN_DIR/.beaker_hosts_* and the gather barrier passes
+#      (NODES[0]=teacher, NODES[1]=rollout, NODES[2]=trainer) -> the KEY launcher risk, de-risked here.
+#   2. health gate: teacher :8100 + rollout :8200 both 200 (teacher pays the one-time fp4 autotune ~15min first).
+#   3. trainer c10d rendezvous forms world 8; orchestrator drives steps.
+#   4. step=1..20 with loss decreasing, eos high, weight-sync wv ticking (WEIGHT_SYNC_EVERY=1 -> sync every step).
+#   If (1) hangs, BEAKER_NODE_HOSTNAME peer-routability is the suspect (the launcher's one unverified assumption).
+#   Then scale to the full opd_v33_b200.yaml (8 nodes, her V33 knobs, MAX_STEPS=100000).
