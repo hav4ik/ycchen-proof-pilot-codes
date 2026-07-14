@@ -34,8 +34,8 @@ tasks:
     synchronizedStartTimeout: 30m                   # wait for all 8 replicas to be ready before the command runs
 
     image:
-      docker: chankhavu/ycchen-opd:cu128@sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c
-      # ^ pinned SHIP digest (built @924bfe3, drift-clean; all B200 fixes: trainer FA2 + rollout triton sink +
+      docker: chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25
+      # ^ pinned SHIP digest (built @9c81803, drift-clean; all B200 fixes: trainer FA2 + rollout triton sink +
       #   teacher flashinfer_mxfp4 auto-detect — all validated on B200). UPDATE this digest on every rebuild.
       #   Or import into Beaker for faster pulls than Docker Hub:
       # beaker: "<PLACEHOLDER: ai2/ycchen-opd-cu128>"

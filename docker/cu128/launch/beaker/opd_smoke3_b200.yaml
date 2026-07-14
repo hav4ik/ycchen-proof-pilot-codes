@@ -29,7 +29,7 @@ tasks:
     synchronizedStartTimeout: 20m
 
     image:
-      docker: chankhavu/ycchen-opd:cu128@sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c
+      docker: chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25
       # ^ same pinned SHIP digest as the full run (teacher auto-detects flashinfer_mxfp4 on B200). UPDATE on rebuild.
 
     # env_v33_b200.sh sets her FULL V33 production knobs; sourcing it first means EVERY knob starts at

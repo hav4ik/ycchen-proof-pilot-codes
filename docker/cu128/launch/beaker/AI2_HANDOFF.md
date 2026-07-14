@@ -7,7 +7,7 @@ run dir, and (3) a WRITABLE shared JIT-compile cache dir.** Then fill the site-s
 
 **Image (ship digest, drift-clean, all B200 fixes validated on B200):**
 ```
-chankhavu/ycchen-opd:cu128@sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c
+chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25
 ```
 (Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
 
@@ -66,7 +66,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 |---|---|---|
 | `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
 | **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
-| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. With `JIT_CACHE_SEED=1` (the yamls set it) the image seeds its baked compile cache into this dir on launch (see below), so a cold first run skips the ~10–20 min compile. |
+| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. The image seeds its baked compile cache **+ fp4 autotune** into this dir on launch (ON by default — see below), so a cold first run reaches `/health` in ~1–2 min. |
 
 **About the JIT cache (your "writable/saveable cache dir"):** on a fully cold node the DeepSeek-V4 teacher
 spends **~10–20 min** JIT-compiling fp8/fp4 kernels per GEMM shape **plus ~15 min** on the flashinfer fp4 MoE

@@ -40,7 +40,7 @@ gaps, no config fixes them. (The `docker run … nvidia-smi` also doubles as you
 
 ```bash
 docker pull chankhavu/ycchen-opd:cu128
-# current digest: sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c  (built at 924bfe3)
+# current digest: sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25  (built at 9c81803)
 docker image inspect chankhavu/ycchen-opd:cu128 --format '{{index .RepoDigests 0}}'   # must match ^
 # air-gapped node instead? on the dev box:  docker save ycchen-opd:cu128 | gzip | ssh h200 'gunzip | docker load'
 ```
@@ -170,7 +170,7 @@ Run on a clean 8×H200 after `docker pull chankhavu/ycchen-opd:cu128` to certify
 hot-patching). In-container, cheapest→most-expensive:
 
 1. **Image integrity** — `docker image inspect chankhavu/ycchen-opd:cu128 --format '{{index .RepoDigests 0}}'`
-   matches `sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c`. In-container the
+   matches `sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25`. In-container the
    flash_rl loader shows 4 fix markers, and forward-compat lib + `curand.h` + `MEMFRAC:-0.70` are baked
    (see the Step-1 verify block above).
 2. **Sink correctness** — `python /opt/opd/test_attention_sink.py --list` then `--group all`. Every

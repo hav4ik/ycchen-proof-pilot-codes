@@ -15,8 +15,8 @@ finish H200 agentic acceptance, then the B200 hardware pass via the Beaker 3-nod
 
 | tag | digest | built at | contents | for |
 |---|---|---|---|---|
-| `chankhavu/ycchen-opd:cu128` | **`sha256:1aa10603…`** | `924bfe3` | fixes #1–#10 + `JIT_CACHE_DIR` + `faf4c62` + seed mirror + **B200 teacher `flashinfer_mxfp4` auto-detect** + harness fix + prefill bench | **PRODUCTION / SHIP** — drift-clean (`924bfe3..HEAD` empty) |
-| `chankhavu/ycchen-opd:cu128` (intermediate) | `sha256:451201a8…` | `94efb6c` | missing the B200 teacher MoE fixes (`88dce35`/`924bfe3`/`8240b78`) | superseded — do NOT ship |
+| `chankhavu/ycchen-opd:cu128` | **`sha256:908516a7…`** | `9c81803` | fixes #1–#10 + `JIT_CACHE_DIR` + `faf4c62` + seed mirror + **B200 teacher `flashinfer_mxfp4` auto-detect** + harness fix + prefill bench | **PRODUCTION / SHIP** — drift-clean (`9c81803..HEAD` empty) |
+| `chankhavu/ycchen-opd:cu128` (intermediate) | `sha256:451201a8…` | `94efb6c` | missing the B200 teacher MoE fixes (`88dce35`/`9c81803`/`8240b78`) | superseded — do NOT ship |
 | `chankhavu/ycchen-opd:cu128` (old) | `sha256:5e3ba5f6…` | `74c1dac` | missing `faf4c62` | superseded — do NOT ship |
 | `chankhavu/ycchen-opd:cu128-flashinfer-sink` | `sha256:30994b4d…` | `321aff6` | + flashinfer sink (0.6.14) | evaluation only — NOT production |
 
@@ -30,8 +30,8 @@ finish H200 agentic acceptance, then the B200 hardware pass via the Beaker 3-nod
   built at `74c1dac`; `faf4c62` (agentic `AGENTIC_MAX_PROMPT_TOKENS` auto-scale) landed AFTER → not baked →
   scaled-smoke agentic tripped `max_prompt_tokens=100000 > max_traj=57344`. **Rule: rebuild the ship image from
   HEAD as the last step; `git log <build>..HEAD -- docker/ training/ *.sh *.py` must be EMPTY.** ✅ Done (twice):
-  `451201a8`@`94efb6c` baked `faf4c62`, then the final `1aa10603`@`924bfe3` baked the B200 teacher fixes — drift
-  check `924bfe3..HEAD` empty. **`1aa10603` is the ship image.** Full gate: `OPD_V2_SHIP_CHECKLIST.md`.
+  `451201a8`@`94efb6c` baked `faf4c62`, then the final `908516a7`@`9c81803` baked the B200 teacher fixes — drift
+  check `9c81803..HEAD` empty. **`908516a7` is the ship image.** Full gate: `OPD_V2_SHIP_CHECKLIST.md`.
 - **`JIT_CACHE_DIR`** (opt-in, baked in `run_{teacher,rollout,teacher_olmo3}.sh`): set it to a persistent path →
   symlinks `~/.cache/{deep_gemm,flashinfer,sglang,tvm-ffi}` there (arch+role scoped) so DeepGEMM compile cache
   survives runs/instances (kills the ~10–20 min teacher cold-warm). No-op when unset.
@@ -60,7 +60,7 @@ Operational gotchas (also in the bring-up doc):
   compute-bound (11264 chunks → 20–40k tok/s). `--disable-cuda-graph` on the teacher is HERS (prefill-only).
 - **agentic `max_prompt_tokens > max_traj` guard:** config default 100000 is sized for her 130k prod ctx; the
   scaled smoke (57344) needs `AGENTIC_MAX_PROMPT_TOKENS ≤ max_traj` — `env_1node_smoke.sh` auto-scales to
-  MAX_TRAJ/2 (= 28672) via `faf4c62`, **now baked in the ship image `1aa10603`** (no manual override needed;
+  MAX_TRAJ/2 (= 28672) via `faf4c62`, **now baked in the ship image `908516a7`** (no manual override needed;
   the old `5e3ba5f6` required passing it by hand).
 - `Scale param shape … not divisible by 3` weight-sync warning is BENIGN (her code, GQA q/k/v asymmetry).
 
@@ -144,9 +144,9 @@ bf16 sinks OK), but **rejected for production**: throughput flips by KV dtype �
 
 ## 7 · OPEN ITEMS
 
-1. ✅ **Final drift-clean rebuild — DONE** → **`sha256:1aa10603…`** (built at `924bfe3`). Baked `8240b78`
-   (harness) + `88dce35` (teacher MoE env) + `99b2d03` (bench) + `924bfe3` (auto-detect `flashinfer_mxfp4` on
-   sm_100). Drift check `924bfe3..HEAD` EMPTY; fixes spot-checked in-container. **This is the ship image for Ai2.**
+1. ✅ **Final drift-clean rebuild — DONE** → **`sha256:908516a7…`** (built at `9c81803`). Baked `8240b78`
+   (harness) + `88dce35` (teacher MoE env) + `99b2d03` (bench) + `9c81803` (auto-detect `flashinfer_mxfp4` on
+   sm_100). Drift check `9c81803..HEAD` EMPTY; fixes spot-checked in-container. **This is the ship image for Ai2.**
 2. **Beaker 3-node smoke** (multi-node launcher: rank→role, hostname gather, cross-node c10d) → full 64× V33.
    ALL single-node components are now green on sm_100 (trainer FA2, rollout, teacher). Fill the yaml placeholders;
    set a fixed shared-Weka `JIT_CACHE_DIR`; teacher `MOE_BACKEND=flashinfer_mxfp4` is baked in `env_v33_b200.sh`.
