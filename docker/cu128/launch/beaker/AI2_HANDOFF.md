@@ -11,10 +11,10 @@ chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347
 ```
 (Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
 
-**In this folder:** [`README.md`](README.md) (submit steps + launcher internals) · [`opd_v33_b200.yaml`](opd_v33_b200.yaml)
-(**production** — faithful V33, 8×B200 1+4+3) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) (3-node launcher smoke) ·
-[`opd_max_b200.yaml`](opd_max_b200.yaml) (**optional** — V33 + ~25% longer rollout, 160k; same prerequisites).
-**This file is the prerequisites + spec-filling guide** — it applies to all three.
+**In this folder:** [`README.md`](README.md) (submit steps + launcher internals) · **[`opd_max_b200.yaml`](opd_max_b200.yaml)
+— the RECOMMENDED 64×B200 run** (her V33 pipeline + ~25% longer rollout, 160k) · [`opd_v33_b200.yaml`](opd_v33_b200.yaml)
+(byte-faithful V33 baseline, 128k — for the exact reproduction) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml)
+(3-node launcher smoke). **This file is the prerequisites + spec-filling guide** — it applies to all three.
 
 ---
 
@@ -66,7 +66,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 | path (in-job) | must be | why |
 |---|---|---|
 | `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
-| **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
+| **`RUN_DIR`** (e.g. `/weka/run/opd_max`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. **Each run needs its OWN `RUN_DIR`** — the three yamls default to distinct paths (`/weka/run/opd_max_b200`, `opd_v33_b200`, `opd_smoke3_b200`); never share one, since their `config.json` + agentic pools have different context lengths (160k / 128k / 57k) and would clobber each other. |
 | **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. The image seeds its baked compile cache **+ fp4 autotune** into this dir on launch (ON by default — see below), so a cold first run reaches `/health` in ~1–2 min. |
 
 **About the JIT cache (your "writable/saveable cache dir"):** on a fully cold node the DeepSeek-V4 teacher
@@ -113,7 +113,8 @@ regenerating the dataset from *your* hardware, if ever.
 
 ## 3 · Fill the Beaker spec — most of it is already done
 
-Both `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke) come with a
+All three yamls (`opd_max_b200.yaml` recommended, `opd_v33_b200.yaml` faithful baseline, `opd_smoke3_b200.yaml`
+smoke) share the same placeholders and come with a
 **working default** for the mechanical bits; the infra-specific values are yours to set — you know your
 environment better than any default we'd guess.
 
@@ -145,13 +146,20 @@ beaker experiment create docker/cu128/launch/beaker/opd_smoke3_b200.yaml
 #     green = all 3 replicas gather hostnames, teacher+rollout health-pass, trainer forms world 8,
 #             steps 1..20 with loss ↓, weight-sync ticking (footer of the yaml has the full checklist)
 
-# (b) full 64x B200 V33 — her production config
-beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
+# (b) full 64x B200 — the RECOMMENDED run: opd_max (her V33 pipeline + ~25% longer rollout, 160k ctx)
+beaker experiment create docker/cu128/launch/beaker/opd_max_b200.yaml
+#     ! on step 1, confirm the trainer doesn't OOM at MICRO=163840; if it does, back off MICRO +
+#       MAX_TRAJ_TOKENS together by ~8k (the yaml header documents this single knob).
+
+# (alt) the byte-faithful V33 baseline (128k) — run this instead only for Yi-Chia's exact reproduction:
+# beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
 ```
-The smoke (`RUN_DIR=/weka/run/opd_smoke3_b200`) and the full run (`RUN_DIR=/weka/run/opd_v33_b200`) write to
-**separate** run dirs — keep them distinct so the smoke's scaled-down config/pool never touches production.
-They **do** share one dir on purpose: `JIT_CACHE_DIR` (`/weka/run/jit_cache`), so the smoke warms the fp4/DeepGEMM
-kernels that the full run then reuses.
+**`opd_max` is the config to run** — it's her exact V33 with only the rollout length raised ~25% (every
+training knob identical, in-distribution for the student, memory-safe on B200). **`opd_v33`** is the
+byte-faithful 128k baseline, kept for reference / exact reproduction. Give **each run its own `RUN_DIR`**
+(`/weka/run/opd_max_b200` vs `.../opd_v33_b200` vs `.../opd_smoke3_b200`) — never shared, since their
+`config.json` + agentic pools have different context lengths. They **do** share `JIT_CACHE_DIR` on purpose
+(`/weka/run/jit_cache`) — the smoke warms kernels the full run reuses; `cp -rn` is additive.
 
 ---
 

@@ -1,13 +1,17 @@
-# OPD v2 on Beaker — V33 64x B200 (DRAFT)
+# OPD v2 on Beaker — 64x B200 (DRAFT)
 
-Beaker launcher for Yi-Chia Chen's **V33** OPD v2 run: **64x B200 = 8 nodes x 8 GPU**, packaged in
-`chankhavu/ycchen-opd:cu128`. This is the Slurm→Beaker port of the verified slurm launcher.
+Beaker launcher for Yi-Chia Chen's OPD v2 run on **64x B200 = 8 nodes x 8 GPU**, packaged in
+`chankhavu/ycchen-opd:cu128` (Slurm→Beaker port of the verified slurm launcher). Three specs:
+- **[`opd_max_b200.yaml`](opd_max_b200.yaml) — the config to run** (recommended): her V33 pipeline with the
+  rollout length raised ~25% (128k → 160k). Everything else is her exact V33; the longer proofs are the point.
+- **[`opd_v33_b200.yaml`](opd_v33_b200.yaml)** — the byte-faithful V33 baseline (128k), for the exact reproduction.
+- **[`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml)** — a cheap 3-node launcher smoke; run it first.
 
 > **Status:** the mechanical bits come with a **working default** — a candidate cluster (`ai2/titan-cirrascale`
 > B200), NCCL (`ib`/`^=mlx5_bond_0`), `gpuCount`, `sharedMemory`, `timeout`, and the pinned image. **Replace every
 > `<PLACEHOLDER: …>`**: the infra ones (budget, Weka bucket+`subPath`, priority, cluster/NCCL) are your call — set
-> them for your environment; the rest just un-wrap a recommended value. Run the 3-node smoke first, then the
-> 8-node run. **Full prerequisites → [AI2_HANDOFF.md](AI2_HANDOFF.md).**
+> them for your environment; the rest just un-wrap a recommended value. Run the 3-node smoke first, then
+> **`opd_max_b200.yaml`** (the recommended 8-node run). **Full prerequisites → [AI2_HANDOFF.md](AI2_HANDOFF.md).**
 
 ## Prerequisites (before submitting) — full detail in [AI2_HANDOFF.md](AI2_HANDOFF.md)
 - **Models** (download to Weka, mount read-only): teacher `deepseek-ai/DeepSeek-V4-Flash` → `/models/DeepSeek-V4-Flash`
@@ -21,7 +25,8 @@ Beaker launcher for Yi-Chia Chen's **V33** OPD v2 run: **64x B200 = 8 nodes x 8 
 
 | file | what | topology |
 |---|---|---|
-| [`opd_v33_b200.yaml`](opd_v33_b200.yaml) | **production** — 8×B200, her V33 knobs, `replicas: 8` | 1+4+3 |
+| [`opd_max_b200.yaml`](opd_max_b200.yaml) | **RECOMMENDED run** — 8×B200, her V33 + ~25% longer rollout (160k), `replicas: 8` | 1+4+3 |
+| [`opd_v33_b200.yaml`](opd_v33_b200.yaml) | byte-faithful V33 baseline (128k) — exact reproduction, `replicas: 8` | 1+4+3 |
 | [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) | **launcher smoke** — 24×B200, 57k ctx, 20 steps, `replicas: 3` | 1+1+1 |
 | [`run_mn_beaker.sh`](../run_mn_beaker.sh) | the launcher each replica runs; role dispatch by `BEAKER_REPLICA_RANK`. | — |
 
@@ -34,8 +39,10 @@ port scheme (`PORT_SHIFT`), health gate, launch order, `make_config`, `opd_v2.tr
 ```bash
 # 1) (recommended) import the docker image into Beaker for faster pulls, then set image.beaker:
 #    beaker image create chankhavu/ycchen-opd:cu128 --name ycchen-opd-cu128
-# 2) fill the PLACEHOLDERs, then:
-beaker experiment create docker/cu128/launch/beaker/opd_v33_b200.yaml
+# 2) fill the PLACEHOLDERs, run the smoke, then the recommended run:
+beaker experiment create docker/cu128/launch/beaker/opd_smoke3_b200.yaml   # launcher smoke first
+beaker experiment create docker/cu128/launch/beaker/opd_max_b200.yaml      # the run (V33 + 25% longer rollout)
+# exact-faithful 128k baseline instead:  opd_v33_b200.yaml
 ```
 
 Watch: `beaker experiment logs <id>` (per-replica). Health/metrics land in `wandb` and in
@@ -128,7 +135,8 @@ Node-local (must **not** be shared, and are not): the teacher spool `/dev/shm/op
 
 ## PLACEHOLDER checklist (fill before submit)
 
-In `opd_v33_b200.yaml` (values are quoted so the file stays valid YAML — replace the whole quoted string):
+In your chosen run yaml — **`opd_max_b200.yaml`** (recommended) or `opd_v33_b200.yaml` (faithful baseline); same
+placeholders in both. Values are quoted so the file stays valid YAML — replace the whole quoted string:
 
 - [ ] `budget` — your Beaker budget account.
 - [ ] `constraints.cluster` — your **sm_100 (B200/B300) cluster** (8 GPU/node; 8 nodes for the full run).
