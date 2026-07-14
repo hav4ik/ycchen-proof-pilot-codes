@@ -1,0 +1,164 @@
+# OPD v2 — "MAX" run: her V33 pipeline + ~25% LONGER ROLLOUT on 64x B200 (8 nodes x 8 GPU).
+# =============================== DRAFT — human review required ================================
+# DELIBERATE VARIANT of opd_v33_b200.yaml — NOT the faithful reproduction. It is her exact V33 with ONE
+# change: rollout/trajectory length raised ~25% (128k -> 160k). Everything else (LR, beta, batch, topology,
+# teacher/rollout backends, checkpointing) is IDENTICAL to V33. For the faithful result run opd_v33; run
+# this only to push proof length.
+#   why it's safe: student Olmo3 yarn ceiling = 262144 (256k) -> 160k is in-distribution (no extrapolation);
+#   teacher supports 1M; B200's ~45GB extra memory over H200 absorbs the +25% trainer MICRO (her V33 sat at
+#   the H200 ~139GB edge; +25% worst-case ~+35GB -> ~174GB < B200 ~180GB). Timeouts UNCHANGED: B200 decode
+#   (~1.67x H200 HBM bandwidth) finishes the 25%-longer gen in ~0.75x the wall-clock.
+#   ! VALIDATE on step 1: if the trainer OOMs at MICRO=163840, back off MICRO + MAX_TRAJ_TOKENS TOGETHER by
+#     ~8k (her documented single knob) until it fits — no other re-analysis needed.
+# Fill EVERY "<PLACEHOLDER: ...>". Submit:  beaker experiment create docker/cu128/launch/beaker/opd_max_b200.yaml
+# ==============================================================================================
+#
+# Topology (env_v33_b200.sh): 8 replicas, one per node. run_mn_beaker.sh assigns each node's role
+# from BEAKER_REPLICA_RANK:  rank 0 = teacher (TP4x2) | ranks 1-4 = rollout (TP4x2 fp8) |
+# ranks 5-7 = trainer (FSDP2 world 24); rank 5 (first trainer) also runs the orchestrator.
+#
+# CRITICAL — the shared run dir: RUN_DIR is the single source of truth shared by ALL 8 replicas
+# (config.json, trainer_endpoint.json, the teacher hidden-state spool index, the weight-sync buffer,
+# rolling weights, DCP checkpoints, the agentic pool, the rank->hostname gather, all logs). It MUST
+# be a WRITABLE filesystem visible at the SAME path on every replica. Use whatever writable shared
+# storage your team uses for training state; the loop writes config/checkpoints/gather/logs to RUN_DIR,
+# so a read-only mount there fails at the first gather. Confirm it's writable before launch.
+
+version: v2
+budget: "<PLACEHOLDER: your Beaker budget>"
+description: "OPD v2 MAX (V33 + ~25% longer rollout, 160k ctx) on 64x B200, 8 replicas"
+retry:
+  allowedTaskRetries: 2                             # ride out transient GPU/node failures (more likely at 64 GPU)
+
+tasks:
+  - name: opd-max-b200
+    # ---- replicated multi-node primitives (confirmed against beaker-docs distributed-training) ----
+    replicas: 8                                     # 1 teacher + 4 rollout + 3 trainer = 8 nodes
+    leaderSelection: true                           # injects BEAKER_LEADER_REPLICA_HOSTNAME (needs replicas>=2 + hostNetworking)
+    hostNetworking: true                            # replicas reach each other by hostname; required for IB/NCCL
+    propagateFailure: true                          # if any replica fails, cancel the rest
+    propagatePreemption: true                       # if any replica is preempted, preempt the rest
+    synchronizedStartTimeout: 30m                   # wait for all 8 replicas to be ready before the command runs
+
+    image:
+      docker: chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347601c6b2b9ca0ef1a25
+      # ^ pinned SHIP digest (built @9c81803, drift-clean; all B200 fixes: trainer FA2 + rollout triton sink +
+      #   teacher flashinfer_mxfp4 auto-detect — all validated on B200). UPDATE this digest on every rebuild.
+      #   Or import into Beaker for faster pulls than Docker Hub:
+      # beaker: "<PLACEHOLDER: ai2/ycchen-opd-cu128>"
+
+    # env_v33_b200.sh sets her FULL V33 knobs; the inline overrides raise ONLY the rollout/trajectory length
+    # +25% (128k -> 160k). Everything else stays her V33. Timeouts are NOT overridden (B200 decode is faster,
+    # so the longer gen still finishes inside her 6000s / 7200s). The 5 length knobs are hard-coupled:
+    #   CONTEXT_LEN = MAX_TRAJ_TOKENS = 163584 (rollout window = prompt+gen cap)
+    #   MAX_NEW_TOKENS = 160000        (gen cap; produce clamps to max_traj - prompt)
+    #   MICRO = 163840 (160*1024)      (trainer bin; MUST stay >= MAX_TRAJ_TOKENS, else core.py:328 hard-blocks)
+    #   TEACHER_CONTEXT_LEN = 190000   (MUST exceed max_traj so the teacher never length-fails; teacher = 1M ctx)
+    command: ["bash", "-lc",
+      "source /opt/opd/launch/env_v33_b200.sh && \
+       CONTEXT_LEN=163584 MAX_TRAJ_TOKENS=163584 MAX_NEW_TOKENS=160000 MICRO=163840 \
+       TEACHER_CONTEXT_LEN=190000 \
+       RUN_NAME=agentic_32b_lc160k_max \
+       bash /opt/opd/launch/run_mn_beaker.sh"]
+
+    envVars:
+      # ---- required cluster paths (env_v33_b200.sh does NOT set these) ----
+      # RUN_DIR = this run's PRIVATE state dir. Keep it DISTINCT from opd_v33's and the smoke's RUN_DIRs —
+      # their config.json + agentic pools have DIFFERENT context lengths (128k vs 160k vs 57k) and MUST NOT
+      # mix. (JIT_CACHE_DIR below is safe to share with V33: it's the arch+role-scoped compile cache; the
+      # longer shapes just add cache entries, cp -rn never clobbers.)
+      - name: RUN_DIR                               # MUST be on the WRITABLE shared mount below; MAX-run-only path
+        value: "<PLACEHOLDER: /weka/run/opd_max_b200>"      # <- keep DIFFERENT from opd_v33 and the smoke
+      - name: DEEPSEEK_V4_FLASH                     # teacher checkpoint dir (read)
+        value: "<PLACEHOLDER: /models/DeepSeek-V4-Flash>"
+      - name: STUDENT_PATH                          # deploy-format student dir (read); works for trainer+rollout
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: ROLLOUT_MODEL                         # = STUDENT_PATH (same deploy dir)
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: STUDENT_DEPLOY_PATH                   # deploy dir used by weight-sync saves — see README (may need WRITABLE)
+        value: "<PLACEHOLDER: /models/student-deploy>"
+      - name: JIT_CACHE_DIR                         # persistent compile cache -> skips the ~8-min/shape cold DeepGEMM warm
+        value: "<PLACEHOLDER: /weka/run/jit_cache>" # a FIXED shared path (NOT under the per-run RUN_DIR) on the same Weka
+                                                    # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
+                                                    # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
+      # JIT pre-seed is ON by default in the image: at startup, run_{teacher,rollout}.sh copy the baked
+      # /opt/opd/jit-cache-seed/sm100/{teacher,rollout} (compile cubins + fp4 autotune) into JIT_CACHE_DIR
+      # (cp -rn, never clobbers a warmer cache) -> a cold first run reaches /health in ~1-2min instead of
+      # ~25-35min. To override, uncomment:
+      #   - name: JIT_AUTOTUNE_SEED    # "0" = seed compile only, re-tune the fp4 autotune for your hardware (try first)
+      #     value: "0"
+      #   - name: JIT_CACHE_SEED       # "0" = seed nothing (recompile + re-tune everything from scratch)
+      #     value: "0"
+      # RECOVERY if the pre-built cache misbehaves: JIT_CACHE_DIR is PERSISTENT, so the flag alone won't undo a
+      # bad seed already on disk — FIRST `rm -rf $JIT_CACHE_DIR/sm100/`, THEN set the flag above. See AI2_HANDOFF §2.
+
+      # ---- B200 NCCL fabric (ai2 InfiniBand clusters — Titan has 8x IB 400 Gbps/GPU; per beaker-docs) ----
+      - name: NCCL_SOCKET_IFNAME
+        value: "ib"                                 # all ib* interfaces (avoids the slow ethernet devices)
+      - name: NCCL_IB_HCA
+        value: "^=mlx5_bond_0"                       # ai2 IB HCA selector
+      - name: NCCL_DEBUG
+        value: "INFO"                                # drop to WARN once the fabric is confirmed healthy
+
+      # ---- optional overrides (uncomment as needed) ----
+      # TOPOLOGY: ROLLOUT_NNODES is the ONE balance knob (trainer = 8 - 1 - ROLLOUT_NNODES). Both memory-safe
+      # (HSDP shards within-node at 8, so trainer count doesn't change per-GPU memory):
+      #   4 (default) -> 1+4+3 (V33, her optimized — trainer was the bottleneck on H200)
+      #   5           -> 1+5+2 (her pre-V33 fallback — use if starved_frac spikes = rollout-bound; B200's faster
+      #                         trainer may flip it there, so watch the metric before switching)
+      # - name: ROLLOUT_NNODES
+      #   value: "5"
+      # MOE_BACKEND is AUTO-DETECTED (run_teacher.sh: B200 sm_100 -> flashinfer_mxfp4; Hopper -> auto/marlin).
+      # Override ONLY to force a specific backend:
+      # - name: MOE_BACKEND
+      #   value: "flashinfer_mxfp4"
+      # - name: MAX_STEPS
+      #   value: "100000"
+      # - name: WANDB_MODE
+      #   value: "online"
+      # WANDB_API_KEY is a BLOCKED literal name — source it from a Beaker secret instead:
+      # - name: WANDB_API_KEY
+      #   secret: "<PLACEHOLDER: wandb-api-key>"     # `beaker secret write wandb-api-key <key>`
+      # SEED_SOURCE defaults to chankhavu/ycchen-dsflash-proof-distill-v2-test (PUBLIC, user-owned mirror of
+      # ycchen/dsflash-proof-distill-v2-test) -> build_seed does a live load_dataset at startup, so the node
+      # needs network to HF (public = no token). To run fully offline, pre-build the pool once and mount it:
+      #   python -m opd_v2.agentic.seed --run-dir <RUN_DIR>   # writes <RUN_DIR>/pool/seed.jsonl (skipped if present)
+      # HF_TOKEN not required (SEED_SOURCE + models are public); add as a secret only if you gate the models:
+      # - name: HF_TOKEN
+      #   secret: "<PLACEHOLDER: hf-token>"
+
+    datasets:
+      # WRITABLE shared run dir (config/endpoint/spool/weights/checkpoints/gather/logs). CRITICAL — the loop
+      # coordinates through it, so this mount MUST be writable (RUN_DIR + JIT_CACHE_DIR live under it). Use
+      # your team's writable shared storage; a Weka mount is shown here.
+      - mountPath: /weka/run
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"   # your team's writable bucket
+        subPath: "<PLACEHOLDER: opd/run>"           # a writable prefix in the bucket (RUN_DIR + JIT_CACHE_DIR live under it)
+      # teacher weights (DeepSeek-V4-Flash) — mountPath must not overlap the others
+      - mountPath: /models/DeepSeek-V4-Flash
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"
+      # student deploy-format weights (trainer + rollout) = chankhavu/yccchen-olmo3-deploy from HF.
+      # subPath is just the FOLDER ON WEKA where you `hf download`ed it (NOT an HF repo / model name);
+      # it gets mounted at mountPath, and the code reads STUDENT_PATH=/models/student-deploy = the mountPath.
+      - mountPath: /models/student-deploy
+        source:
+          weka: "<PLACEHOLDER: your-weka-bucket>"
+        subPath: "<PLACEHOLDER: models/student-deploy>"   # = the --local-dir you downloaded yccchen-olmo3-deploy to
+
+    resources:
+      gpuCount: 8                                   # whole 8-GPU B200 node per replica (Titan = 8x B200/node)
+      sharedMemory: 128GiB                          # teacher hidden spool lives in /dev/shm (default 5GiB is too small)
+
+    context:
+      priority: "<PLACEHOLDER: your Beaker priority>"   # your call — set per your team's allocation
+
+    constraints:
+      cluster:
+        # Requirement: sm_100 nodes (B200 or B300), 8 GPU/node; this run needs 8 nodes = 64 GPUs. Pick your cluster:
+        - ai2/titan-cirrascale                      # B200 (192 GB), 8x IB 400 Gbps/GPU; meets our cu12.8+/torch>=2.7
+        # - ai2/holmes                              # alt: B300 (288 GB), 800 Gbps/GPU — also sm_100, teacher auto-detect handles it
+
+    timeout: 96h                                     # max job lifespan (your cluster may cap this)

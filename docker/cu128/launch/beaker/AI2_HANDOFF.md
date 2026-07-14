@@ -12,8 +12,9 @@ chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347
 (Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
 
 **In this folder:** [`README.md`](README.md) (submit steps + launcher internals) · [`opd_v33_b200.yaml`](opd_v33_b200.yaml)
-(production spec, 8×B200, her V33 1+4+3) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) (3-node launcher smoke).
-**This file is the prerequisites + spec-filling guide.**
+(**production** — faithful V33, 8×B200 1+4+3) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) (3-node launcher smoke) ·
+[`opd_max_b200.yaml`](opd_max_b200.yaml) (**optional** — V33 + ~25% longer rollout, 160k; same prerequisites).
+**This file is the prerequisites + spec-filling guide** — it applies to all three.
 
 ---
 
