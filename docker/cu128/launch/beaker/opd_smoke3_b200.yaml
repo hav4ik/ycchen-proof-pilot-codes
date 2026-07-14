@@ -86,18 +86,20 @@ tasks:
       #   secret: "<PLACEHOLDER: wandb-api-key>"
 
     datasets:
+      # subPath = the FOLDER ON WEKA to mount (where you downloaded the files), NOT an HF repo / model name.
+      # mountPath = where it appears in the job (the code reads those fixed paths). Same weka bucket for all three.
       - mountPath: /weka/run
         source:
           weka: "<PLACEHOLDER: your-weka-bucket>"
         subPath: "<PLACEHOLDER: opd/run>"
-      - mountPath: /models/DeepSeek-V4-Flash
+      - mountPath: /models/DeepSeek-V4-Flash                 # = deepseek-ai/DeepSeek-V4-Flash
         source:
           weka: "<PLACEHOLDER: your-weka-bucket>"
-        subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"
-      - mountPath: /models/student-deploy
+        subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"   # = the --local-dir you downloaded it to
+      - mountPath: /models/student-deploy                    # = chankhavu/yccchen-olmo3-deploy
         source:
           weka: "<PLACEHOLDER: your-weka-bucket>"
-        subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
+        subPath: "<PLACEHOLDER: models/student-deploy>"      # = the --local-dir you downloaded yccchen-olmo3-deploy to
 
     resources:
       gpuCount: 8                                   # whole 8-GPU B200 node per replica (Titan = 8x B200/node)

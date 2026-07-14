@@ -122,11 +122,13 @@ tasks:
         source:
           weka: "<PLACEHOLDER: your-weka-bucket>"
         subPath: "<PLACEHOLDER: models/DeepSeek-V4-Flash>"
-      # student deploy-format weights (trainer + rollout)
+      # student deploy-format weights (trainer + rollout) = chankhavu/yccchen-olmo3-deploy from HF.
+      # subPath is just the FOLDER ON WEKA where you `hf download`ed it (NOT an HF repo / model name);
+      # it gets mounted at mountPath, and the code reads STUDENT_PATH=/models/student-deploy = the mountPath.
       - mountPath: /models/student-deploy
         source:
           weka: "<PLACEHOLDER: your-weka-bucket>"
-        subPath: "<PLACEHOLDER: models/stage1-v2-32b-softdistill-v2test-deploy>"
+        subPath: "<PLACEHOLDER: models/student-deploy>"   # = the --local-dir you downloaded yccchen-olmo3-deploy to
 
     resources:
       gpuCount: 8                                   # whole 8-GPU B200 node per replica (Titan = 8x B200/node)
