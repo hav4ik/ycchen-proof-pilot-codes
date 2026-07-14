@@ -19,10 +19,15 @@ though they're on GitHub. Concretely:
 **Rule (non-negotiable): rebuild the ship image from the current `opd/b200-cu128` HEAD as the LAST step
 before shipping, and prove no code/config commit is un-baked (§1).**
 
-> ✅ **RESOLVED (2026-07-13):** rebuilt from HEAD as fixes landed — `451201a8`@`94efb6c` (baked `faf4c62`),
-> then the **final `sha256:4c0d4276…`@`c873ab5`** (baked the B200 teacher `flashinfer_mxfp4` auto-detect +
-> harness fix). Drift check `git log c873ab5..HEAD -- docker/ training/ '*.sh' '*.py'` is **empty**; fixes
-> spot-checked *inside the container*. **`4c0d4276` is the image that ships.**
+> ✅ **RESOLVED (2026-07-13):** rebuilt from HEAD as fixes landed — earlier `sha256:4c0d4276…`@`c873ab5`
+> (B200 teacher `flashinfer_mxfp4` auto-detect + harness fix), then the **current `sha256:9d36b998…`@`dcbe556`**,
+> which additionally bakes the **JIT compile-cache seed** (`/opt/opd/jit-cache-seed/sm100/{teacher,rollout}`,
+> 973 files/74M, from `chankhavu/opd-jit-cache-sm100`; runtime-optional via `JIT_CACHE_SEED`) and
+> `CHECKPOINT_EVERY=25`. Drift check on the **runtime-baked paths** —
+> `git log dcbe556..HEAD -- docker/cu128/Dockerfile.ycchen-opd docker/cu128/opd_serve docker/cu128/launch/*.sh training/ '*.py'`
+> — is **empty**; verified *inside the container* (seed at the read path, `CHECKPOINT_EVERY=25`, `JIT_CACHE_SEED`
+> guard). The only post-build commit re-stamps the digest pin in the launch specs + docs (never read at
+> runtime). **`9d36b998` is the image that ships.**
 
 ## §1 — Image is complete (no drift)
 
@@ -114,15 +119,15 @@ before shipping, and prove no code/config commit is un-baked (§1).**
 
 | image | built at | functional commits missing | mitigation |
 |---|---|---|---|
-| **`cu128 @ 4c0d4276`** (SHIP) | **`c873ab5`** | **none** — drift-clean | none needed; this is the image for Ai2 |
-| `cu128 @ 451201a8` (intermediate) | `94efb6c` | B200 teacher MoE (`88dce35`/`c873ab5`/`8240b78`) | replaced by `4c0d4276`; do NOT ship |
-| `cu128 @ 5e3ba5f6` (superseded) | `74c1dac` | `faf4c62` (agentic auto-scale) | replaced by `4c0d4276`; do NOT ship |
+| **`cu128 @ 9d36b998`** (SHIP) | **`dcbe556`** | **none** — drift-clean | none needed; this is the image for Ai2 |
+| `cu128 @ 451201a8` (intermediate) | `94efb6c` | B200 teacher MoE (`88dce35`/`dcbe556`/`8240b78`) | replaced by `9d36b998`; do NOT ship |
+| `cu128 @ 5e3ba5f6` (superseded) | `74c1dac` | `faf4c62` (agentic auto-scale) | replaced by `9d36b998`; do NOT ship |
 | `cu128-flashinfer-sink @ 30994b4d` | `321aff6` | `faf4c62` + seed mirror | not shipped to Ai2 (triton is production); rebuild that branch if ever needed |
 
 > **Ship rule of thumb:** the number that goes to Ai2 is the digest of an image built from a commit where
 > `git log <that-commit>..HEAD -- docker/ training/ *.sh *.py` is **empty**. If it's not empty, rebuild.
 
-> ✅ **FINAL REBUILD DONE (2026-07-13):** all B200 bring-up fixes are baked into **`4c0d4276`@`c873ab5`** —
-> `8240b78` (harness venv order), `88dce35` (env teacher MoE), `99b2d03` (prefill bench), and `c873ab5`
+> ✅ **FINAL REBUILD DONE (2026-07-13):** all B200 bring-up fixes are baked into **`9d36b998`@`dcbe556`** —
+> `8240b78` (harness venv order), `88dce35` (env teacher MoE), `99b2d03` (prefill bench), and `dcbe556`
 > (`run_teacher.sh` auto-detects `flashinfer_mxfp4` on sm_100 so the teacher needs no manual override). Drift
-> check `c873ab5..HEAD` empty. **`4c0d4276` is the drift-clean ship image.**
+> check `dcbe556..HEAD` empty. **`9d36b998` is the drift-clean ship image.**
