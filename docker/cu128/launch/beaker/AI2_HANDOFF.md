@@ -91,6 +91,25 @@ the public dataset [`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/data
 (`opd-jit-sm100-tp4-autotune.tgz`) — **you do not need to fetch it** (it's in the image). Scope: **sm_100
 (B200/B300) at TP4** (matches `TEACHER_TP=ROLLOUT_TP=4`); a different arch/TP just recompiles (harmless).
 
+### Recovery: if the pre-built cache ever misbehaves (clean **and** disable — both are required)
+The seed is copied into `JIT_CACHE_DIR` **at startup, by default** — and because `JIT_CACHE_DIR` is a
+**persistent** Weka path, once a run has seeded it the copy lives there independently of the flags. So if you
+ever suspect the baked cache is behind a kernel error/hang (rare — same arch+version, and every cached tactic
+is a valid kernel), you must do **BOTH**, in order:
+1. **Delete the persistent cache** so the run rebuilds fresh (a stale/bad entry is already on disk — flipping a
+   flag alone will NOT remove it):
+   ```bash
+   rm -rf "$JIT_CACHE_DIR"/sm100/          # drops the seeded cache AND any compiled/tuned entries; safe — it's a cache
+   ```
+2. **Turn off seeding** so the next launch doesn't just re-copy the baked cache. Set in the yaml:
+   - `JIT_AUTOTUNE_SEED=0` → keep the portable compile cache, only re-tune the fp4 autotune (**try this first** —
+     the autotune is the env-specific part, so it's the likely culprit), **or**
+   - `JIT_CACHE_SEED=0` → seed nothing; recompile **and** re-tune everything from scratch on your hardware (nuclear).
+
+The first launch after this pays the one-time compile/autotune (~16–35 min), then persists a clean,
+hardware-native cache that every later run + replica reuses. Re-enable the seed (drop the override) only after
+regenerating the dataset from *your* hardware, if ever.
+
 ## 3 · Fill the Beaker spec — most of it is already done
 
 Both `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke) are

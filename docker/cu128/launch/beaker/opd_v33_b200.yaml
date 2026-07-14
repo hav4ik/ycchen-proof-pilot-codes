@@ -63,14 +63,16 @@ tasks:
         value: "<PLACEHOLDER: /weka/run/jit_cache>" # a FIXED shared path (NOT under the per-run RUN_DIR) on the same Weka
                                                     # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
                                                     # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
-      # JIT pre-seed is ON by default in the image: on launch, run_{teacher,rollout}.sh copy the baked
+      # JIT pre-seed is ON by default in the image: at startup, run_{teacher,rollout}.sh copy the baked
       # /opt/opd/jit-cache-seed/sm100/{teacher,rollout} (compile cubins + fp4 autotune) into JIT_CACHE_DIR
       # (cp -rn, never clobbers a warmer cache) -> a cold first run reaches /health in ~1-2min instead of
       # ~25-35min. To override, uncomment:
-      #   - name: JIT_CACHE_SEED       # "0" = seed nothing (compile everything from scratch)
+      #   - name: JIT_AUTOTUNE_SEED    # "0" = seed compile only, re-tune the fp4 autotune for your hardware (try first)
       #     value: "0"
-      #   - name: JIT_AUTOTUNE_SEED    # "0" = seed compile only, re-tune the fp4 autotune for your hardware
+      #   - name: JIT_CACHE_SEED       # "0" = seed nothing (recompile + re-tune everything from scratch)
       #     value: "0"
+      # RECOVERY if the pre-built cache misbehaves: JIT_CACHE_DIR is PERSISTENT, so the flag alone won't undo a
+      # bad seed already on disk — FIRST `rm -rf $JIT_CACHE_DIR/sm100/`, THEN set the flag above. See AI2_HANDOFF §2.
 
       # ---- B200 NCCL fabric (ai2 InfiniBand clusters — Titan has 8x IB 400 Gbps/GPU; per beaker-docs) ----
       - name: NCCL_SOCKET_IFNAME
