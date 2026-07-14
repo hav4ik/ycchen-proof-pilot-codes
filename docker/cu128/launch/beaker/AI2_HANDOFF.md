@@ -187,3 +187,51 @@ every failure mode we hit during bring-up.
 
 Submit steps + launcher internals: [`README.md`](README.md) (this folder). Full pre-ship gate:
 [`OPD_V2_SHIP_CHECKLIST.md`](../../../../docs/OPD_V2_SHIP_CHECKLIST.md).
+
+---
+
+## Appendix · Data flow & storage — what goes over HTTP vs shared disk
+
+Four process types across the 8 nodes (rank 0 = teacher, 1–4 = rollout, 5–7 = trainer; rank 5 also runs the
+CPU orchestrator). They exchange data over **two transports** — the rule of thumb is **token-ids / handles /
+control go over HTTP; bulk tensors go over shared disk.**
+
+### 1 · Over HTTP (control + small payloads only)
+| from → to | call | payload |
+|---|---|---|
+| orchestrator → **rollout** | `POST /generate` | prompt token-ids → **generated token-ids** back (small) |
+| orchestrator → **teacher** | `POST /score` | `{input_ids, out_path}` → a **handle** `{seq_len,…}` back. **The hidden-state bytes do NOT return over HTTP** — the teacher writes them to `out_path` on shared disk (see §2). |
+| orchestrator → **trainer** | trainer HTTP (`trainer_endpoint.json`) | the training batch = token-ids + hidden **handles** (paths), + step control |
+| orchestrator → **rollout** | `POST /update_weights_from_disk` | just a **trigger** — the rollout then reads the new weights from disk (§2) |
+| head → all servers | `GET /health` | the health gate |
+
+### 2 · Over shared disk = `RUN_DIR` (cross-node — must be ONE writable Weka mount at the SAME path on every node)
+| channel | direction | path | size / churn |
+|---|---|---|---|
+| **hidden states** | **teacher → trainer** | `<RUN_DIR>/hidden/<uuid>.bin` | **LARGE + HIGH-CHURN** (~100–330 MB per trajectory, written → read once → deleted, continuously). This is the throughput-critical channel — it's the whole reason v2 moved hidden off HTTP. Put `RUN_DIR` on your **fast parallel FS**. |
+| **weights (weight-sync)** | **trainer → rollout** | `<RUN_DIR>/weights/` (rolling `_a`/`_b`) | ~64 GB, rewritten every `WEIGHT_SYNC_EVERY` steps |
+| durable checkpoints | trainer | `<RUN_DIR>/checkpoints/step_N/` | DCP shard + bf16 HF export, every 25 steps |
+| coordination | all | `config.json`, `trainer_endpoint.json`, `.beaker_hosts_*`, agentic `pool/`, logs | small |
+
+The trainer on rank 5 reads the `hidden/*.bin` the teacher wrote on rank 0 — so `RUN_DIR` **must** be writable,
+shared, and the identical path on every replica. A read-only or non-shared mount breaks the loop at the first gather.
+
+### 3 · Node-local (must NOT be on Weka)
+| thing | env | why node-local |
+|---|---|---|
+| teacher hidden **staging** | `SGLANG_HIDDEN_SPOOL_DIR=/dev/shm/…` | intra-teacher-node only: the TP-worker ranks spool their hidden shards to `/dev/shm`, then the encode step reads them back **on the same node** and writes the consolidated file to the shared `<RUN_DIR>/hidden/`. This is why `sharedMemory: 128GiB` matters. Never point it at Weka. |
+| JIT compile/autotune cache | `JIT_CACHE_DIR` | see the ⚠️ below. |
+
+### 4 · `JIT_CACHE_DIR` concurrency (only relevant *if* a cache-related race is confirmed)
+`JIT_CACHE_DIR` is the one path here that same-node same-role servers share (2 per role). The underlying JIT
+libraries write their own caches atomically — and Yi-Chia's Slurm runs used the same shared dir with no issue,
+so the compile/autotune sharing itself is fine. The **one** thing our cu128 image adds that she didn't have is
+the **baked-seed `cp -rn`** into that shared dir (not atomic), so two same-node processes seeding at once is a
+*possible* contention point — but this is a hypothesis, not a confirmed cause.
+
+**If** a JIT-cache race is confirmed (check the actual error/path in `teacher_*`/`rollout_*.log`), the no-rebuild
+sidestep is to **leave `JIT_CACHE_DIR` unset** — that skips our redirect+seed block entirely, reverting to stock
+sglang's per-instance cache handling; you lose the fast warm-start (~15–25 min cold compile on the first launch)
+but the run is unblocked. A one-line launcher change to make the seed-copy per-instance (so a shared path stays
+race-safe *and* warm) is available on request. `RUN_DIR` — the real cross-node transport (§2) — is unaffected
+either way.
