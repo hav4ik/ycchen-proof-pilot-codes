@@ -29,6 +29,7 @@ Beaker launcher for Yi-Chia Chen's OPD v2 run on **64x B200 = 8 nodes x 8 GPU**,
 | [`opd_v33_b200.yaml`](opd_v33_b200.yaml) | byte-faithful V33 baseline (128k) — exact reproduction, `replicas: 8` | 1+4+3 |
 | [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml) | **launcher smoke** — 24×B200, 57k ctx, 20 steps, `replicas: 3` | 1+1+1 |
 | [`run_mn_beaker.sh`](../run_mn_beaker.sh) | the launcher each replica runs; role dispatch by `BEAKER_REPLICA_RANK`. | — |
+| [`DEBUGGING.md`](DEBUGGING.md) | **runbook** — the log map (orchestrator/trainer/teacher/student logs) + symptom→fix table. | — |
 
 It is a **faithful** port of [`../run_mn_cu128.sh`](../run_mn_cu128.sh): identical role scripts,
 port scheme (`PORT_SHIFT`), health gate, launch order, `make_config`, `opd_v2.trainer.service`

@@ -14,7 +14,8 @@ chankhavu/ycchen-opd:cu128@sha256:908516a710f3f6c4157a92c0f9723ff862f84a9c3bf347
 **In this folder:** [`README.md`](README.md) (submit steps + launcher internals) · **[`opd_max_b200.yaml`](opd_max_b200.yaml)
 — the RECOMMENDED 64×B200 run** (her V33 pipeline + ~25% longer rollout, 160k) · [`opd_v33_b200.yaml`](opd_v33_b200.yaml)
 (byte-faithful V33 baseline, 128k — for the exact reproduction) · [`opd_smoke3_b200.yaml`](opd_smoke3_b200.yaml)
-(3-node launcher smoke). **This file is the prerequisites + spec-filling guide** — it applies to all three.
+(3-node launcher smoke) · [`DEBUGGING.md`](DEBUGGING.md) (which log → which symptom → fix). **This file is the
+prerequisites + spec-filling guide** — it applies to all three.
 
 ---
 
@@ -160,6 +161,10 @@ byte-faithful 128k baseline, kept for reference / exact reproduction. Give **eac
 (`/weka/run/opd_max_b200` vs `.../opd_v33_b200` vs `.../opd_smoke3_b200`) — never shared, since their
 `config.json` + agentic pools have different context lengths. They **do** share `JIT_CACHE_DIR` on purpose
 (`/weka/run/jit_cache`) — the smoke warms kernels the full run reuses; `cp -rn` is additive.
+
+**If anything misbehaves → [`DEBUGGING.md`](DEBUGGING.md)** — the log map (`orchestrator.log` = the training
+heartbeat, `trainer_<K>.log`, `teacher_*`/`rollout_*.log`, `launch_rank<N>.log`) and a symptom → fix table for
+every failure mode we hit during bring-up.
 
 ---
 
