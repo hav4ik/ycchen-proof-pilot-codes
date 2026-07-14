@@ -63,6 +63,11 @@ tasks:
         value: "<PLACEHOLDER: /weka/run/jit_cache>" # a FIXED shared path (NOT under the per-run RUN_DIR) on the same Weka
                                                     # mount, so it persists ACROSS runs+instances. run_{teacher,rollout}.sh
                                                     # arch+role-scope it (sm90a/sm100 × teacher/rollout). First run warms it.
+      - name: JIT_CACHE_SEED                        # EXPLICIT opt-in to the image's baked compile-cache pre-seed: "1" copies
+        value: "1"                                  # /opt/opd/jit-cache-seed/sm100/{teacher,rollout} into JIT_CACHE_DIR on
+                                                    # launch (cp -rn, never clobbers a warmer cache) -> a cold first run skips
+                                                    # the ~10-20min DeepGEMM/JIT compile. Default OFF (image touches your cache
+                                                    # dir ONLY when this is "1"). Remove this / set "0" to compile from scratch.
 
       # ---- B200 NCCL fabric (ai2 InfiniBand clusters — Titan has 8x IB 400 Gbps/GPU; per beaker-docs) ----
       - name: NCCL_SOCKET_IFNAME

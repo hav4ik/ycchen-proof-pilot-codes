@@ -55,7 +55,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 - [ ] **Teacher** `deepseek-ai/DeepSeek-V4-Flash` downloaded to Weka, mounted at `/models/DeepSeek-V4-Flash`.
 - [ ] **Student** `chankhavu/yccchen-olmo3-deploy` downloaded to Weka, mounted at `/models/student-deploy`.
 - [ ] **`RUN_DIR`** and **`JIT_CACHE_DIR`** are WRITABLE shared Weka paths (JIT_CACHE_DIR fixed, not per-run).
-- [ ] JIT compile cache: **nothing to do** — it ships baked in the image and auto-seeds into `JIT_CACHE_DIR` on launch (§2). Only the ~15 min fp4 autotune runs on the first cold launch (re-tuned per hardware, then persists).
+- [ ] JIT compile cache: **nothing to do** — the yamls already set `JIT_CACHE_SEED=1` to opt in to the baked cache, which seeds into `JIT_CACHE_DIR` on launch (§2). Only the ~15 min fp4 autotune runs on the first cold launch (re-tuned per hardware, then persists). To compile from scratch, remove `JIT_CACHE_SEED` from the yaml.
 - [ ] Seed: nothing (auto-fetched at runtime) — OR pre-build `<RUN_DIR>/pool/seed.jsonl` for an offline cluster.
 - [ ] The 3 team-specific yaml values filled (budget, Weka bucket+subPath, priority) — see §3.
 - [ ] `WANDB_API_KEY` set as a Beaker secret (optional; W&B is online by default).
@@ -66,17 +66,18 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 |---|---|---|
 | `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
 | **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
-| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. The image **auto-seeds** the compile cache into it on launch (baked in — see below), so a cold first run skips the ~10–20 min compile. |
+| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. With `JIT_CACHE_SEED=1` (the yamls set it) the image seeds its baked compile cache into this dir on launch (see below), so a cold first run skips the ~10–20 min compile. |
 
 **About the JIT cache (your "writable/saveable cache dir"):** the DeepSeek-V4 teacher JIT-compiles fp8/fp4
 kernels **per GEMM shape**. A truly cold node would spend **~10–20 min** on the DeepGEMM/JIT compile **plus**
 **~15 min** on the flashinfer fp4 autotune at first launch. The shipped image cuts the first part out entirely:
 
-- **The compile cache ships BAKED INTO THE IMAGE.** `sha256:9d36b998…` carries a pre-built sm_100/TP4 JIT
-  **compile** cache at `/opt/opd/jit-cache-seed/sm100/{teacher,rollout}` (973 files / 74 MB). On launch,
-  `run_{teacher,rollout}.sh` copy it into your `JIT_CACHE_DIR` (`cp -rn`, **never clobbering a warmer cache**),
-  so **even a fully cold first run skips the ~10–20 min compile — no download, no prep step.** The copy is
-  optional: `JIT_CACHE_SEED=0` disables it, and it's skipped entirely if `JIT_CACHE_DIR` is unset.
+- **The compile cache ships BAKED INTO THE IMAGE (opt-in).** `sha256:…` carries a pre-built sm_100/TP4 JIT
+  **compile** cache at `/opt/opd/jit-cache-seed/sm100/{teacher,rollout}` (973 files / 74 MB). When you set
+  **`JIT_CACHE_SEED=1`** (both yamls already do), `run_{teacher,rollout}.sh` copy it into your `JIT_CACHE_DIR`
+  (`cp -rn`, **never clobbering a warmer cache**), so **even a fully cold first run skips the ~10–20 min
+  compile — no download, no prep step.** It is **OPT-IN / default OFF**: without `JIT_CACHE_SEED=1` (or with
+  `JIT_CACHE_DIR` unset) the image **never touches your cache dir** and every kernel compiles from scratch.
 - **Only the ~15 min flashinfer fp4 autotune remains** on the first launch. It's **env-specific** (tuned to
   your exact B200s), so it is deliberately **not** baked — your first run re-tunes for your hardware. With a
   writable, persistent `JIT_CACHE_DIR` on Weka that result also persists, so **every later replica + future
