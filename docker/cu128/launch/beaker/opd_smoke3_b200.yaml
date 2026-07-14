@@ -37,7 +37,9 @@ tasks:
     # The overrides fall in three groups (all smaller than her V33 values):
     #   topology   : TEACHER_NNODES/ROLLOUT_NNODES=1     (1+1+1 = 3 nodes, vs her 1+4+3 = 8)
     #   per-traj   : CONTEXT_LEN/MAX_TRAJ_TOKENS/MICRO 57344 (vs 130816/131072), MAX_NEW_TOKENS 49152 (vs 128000),
-    #                REFINE/SELECT_BUNDLE_CAP 8000 (keeps max_traj >= bundle_cap+min_gen_room(48000) guard happy)
+    #                REFINE/SELECT_BUNDLE_CAP 8000 (keeps max_traj >= bundle_cap+min_gen_room(48000) guard happy),
+    #                AGENTIC_MAX_PROMPT_TOKENS 28672 (= MAX_TRAJ/2; MUST be <= max_traj else orchestrator.py:107
+    #                SystemExits — config default is 100000 > the smoke's 57344; same guard as the faf4c62 fix)
     #   VOLUME/cost: ROLLOUT_N=1 (vs default 4 -> 4x fewer trajectories/request), TARGET_INFLIGHT=32 (vs 512),
     #                ROLLOUT_MAXRUN=16 (vs 64 -> faster cuda-graph warmup, matched to 2 replicas x 16 = 32 in-flight),
     #                TEACHER_MAXRUN=8 (vs 16), TRAIN_BATCH_TRAJS=8 (vs 64), MAX_STEPS=20 (vs 100000), CHECKPOINT_EVERY=0 (off)
@@ -46,7 +48,7 @@ tasks:
       "source /opt/opd/launch/env_v33_b200.sh && \
        TEACHER_NNODES=1 ROLLOUT_NNODES=1 \
        CONTEXT_LEN=57344 MAX_TRAJ_TOKENS=57344 MICRO=57344 MAX_NEW_TOKENS=49152 \
-       REFINE_BUNDLE_CAP=8000 SELECT_BUNDLE_CAP=8000 \
+       REFINE_BUNDLE_CAP=8000 SELECT_BUNDLE_CAP=8000 AGENTIC_MAX_PROMPT_TOKENS=28672 \
        ROLLOUT_N=1 TARGET_INFLIGHT=32 ROLLOUT_MAXRUN=16 TEACHER_MAXRUN=8 \
        TRAIN_BATCH_TRAJS=8 WEIGHT_SYNC_EVERY=1 MAX_STEPS=20 CHECKPOINT_EVERY=0 \
        RUN_NAME=opd_smoke3_b200 WANDB_PROJECT=opd-v2-smoke \
