@@ -3,10 +3,11 @@
 Beaker launcher for Yi-Chia Chen's **V33** OPD v2 run: **64x B200 = 8 nodes x 8 GPU**, packaged in
 `chankhavu/ycchen-opd:cu128`. This is the Slurm→Beaker port of the verified slurm launcher.
 
-> **Status:** the specs are **pre-filled against the Ai2 Beaker docs** for **`ai2/titan-cirrascale`** (96× B200,
-> 192 GB) — cluster, NCCL (`ib`/`^=mlx5_bond_0`), `gpuCount`, `sharedMemory`, `timeout`, and the pinned image are
-> set. You fill **3 team-specific values** (budget, Weka bucket+`subPath`, priority). Run the 3-node smoke first,
-> then the 8-node run. **Full prerequisites → [AI2_HANDOFF.md](AI2_HANDOFF.md).**
+> **Status:** the mechanical bits come with a **working default** — a candidate cluster (`ai2/titan-cirrascale`
+> B200), NCCL (`ib`/`^=mlx5_bond_0`), `gpuCount`, `sharedMemory`, `timeout`, and the pinned image. **Replace every
+> `<PLACEHOLDER: …>`**: the infra ones (budget, Weka bucket+`subPath`, priority, cluster/NCCL) are your call — set
+> them for your environment; the rest just un-wrap a recommended value. Run the 3-node smoke first, then the
+> 8-node run. **Full prerequisites → [AI2_HANDOFF.md](AI2_HANDOFF.md).**
 
 ## Prerequisites (before submitting) — full detail in [AI2_HANDOFF.md](AI2_HANDOFF.md)
 - **Models** (download to Weka, mount read-only): teacher `deepseek-ai/DeepSeek-V4-Flash` → `/models/DeepSeek-V4-Flash`
@@ -129,9 +130,9 @@ Node-local (must **not** be shared, and are not): the teacher spool `/dev/shm/op
 
 In `opd_v33_b200.yaml` (values are quoted so the file stays valid YAML — replace the whole quoted string):
 
-- [ ] `budget` — your Beaker budget (e.g. `ai2/oe-training`).
-- [ ] `constraints.cluster` — the **B200 cluster** name.
-- [ ] `context.priority` — `low`/`normal`/`high`/`urgent`.
+- [ ] `budget` — your Beaker budget account.
+- [ ] `constraints.cluster` — your **sm_100 (B200/B300) cluster** (8 GPU/node; 8 nodes for the full run).
+- [ ] `context.priority` — your call.
 - [ ] `image` — keep `docker: chankhavu/ycchen-opd:cu128`, or import it and set `image.beaker`.
 - [ ] `datasets[].source.weka` + `subPath` — the **writable** Weka bucket/prefix for the run dir,
       and the (read) model dirs for `DeepSeek-V4-Flash` and the student deploy dir. Mount paths must

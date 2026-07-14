@@ -106,7 +106,7 @@ tasks:
       sharedMemory: 128GiB                          # teacher hidden spool lives in /dev/shm
 
     context:
-      priority: "<PLACEHOLDER: normal>"             # YOUR allocation on Titan (strict-priority)
+      priority: "<PLACEHOLDER: your Beaker priority>"   # your call — set per your team's allocation
 
     constraints:
       cluster:

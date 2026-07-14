@@ -57,7 +57,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 - [ ] **`RUN_DIR`** and **`JIT_CACHE_DIR`** are WRITABLE shared Weka paths (JIT_CACHE_DIR fixed, not per-run).
 - [ ] JIT cache: **nothing to do** — the baked compile cache **and** fp4 autotune seed into `JIT_CACHE_DIR` on launch (ON by default), so a cold first run reaches `/health` in ~1–2 min (§2). Override with `JIT_CACHE_SEED=0` (seed nothing) or `JIT_AUTOTUNE_SEED=0` (compile only, re-tune per hardware).
 - [ ] Seed: nothing (auto-fetched at runtime) — OR pre-build `<RUN_DIR>/pool/seed.jsonl` for an offline cluster.
-- [ ] The 3 team-specific yaml values filled (budget, Weka bucket+subPath, priority) — see §3.
+- [ ] **Every `<PLACEHOLDER: …>` in the yaml replaced** — the infra ones (budget, Weka bucket+subPath, priority, cluster/NCCL) are your call; the rest (RUN_DIR, model paths, JIT_CACHE_DIR) just un-wrap the recommended value. See §3.
 - [ ] `WANDB_API_KEY` set as a Beaker secret (optional; W&B is online by default).
 
 ## 2 · Provide the three writable/shared paths
@@ -112,26 +112,26 @@ regenerating the dataset from *your* hardware, if ever.
 
 ## 3 · Fill the Beaker spec — most of it is already done
 
-Both `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke) are
-**pre-filled against the Beaker docs** — cluster, NCCL, GPU count, shared memory, timeout, and the pinned image
-are already set for **Titan**:
+Both `docker/cu128/launch/beaker/opd_v33_b200.yaml` (production) and `opd_smoke3_b200.yaml` (smoke) come with a
+**working default** for the mechanical bits; the infra-specific values are yours to set — you know your
+environment better than any default we'd guess.
 
-- **Cluster: `ai2/titan-cirrascale`** — 96× **B200 (192 GB)**, 8× IB @ 400 Gbps/GPU. Titan requires
-  **PyTorch ≥2.7 + CUDA 12.8+**; our image satisfies it (trainer torch 2.10+cu128, serve torch 2.11+cu130).
-  Her 8-node V33 uses **64 of the 96 GPUs**; the 3-node smoke uses 24. (Alt: `ai2/holmes` = 576× B300 (288 GB) —
-  also sm_100, the teacher auto-detect handles it; uncomment the line.)
-- **NCCL** pre-set to the Ai2 IB values: `NCCL_SOCKET_IFNAME=ib`, `NCCL_IB_HCA=^=mlx5_bond_0`, `NCCL_DEBUG=INFO`.
-- **`gpuCount: 8`**, **`sharedMemory: 128GiB`**, **`timeout`** — set. Image pinned to the ship digest.
-- **Weka is read-write at Ai2** (jobs write as `root:root`), so `RUN_DIR` + `JIT_CACHE_DIR` under a Weka mount
-  are writable — no special config needed.
+Set already (adjust if your cluster differs):
+- **`gpuCount: 8`**, **`sharedMemory: 128GiB`** (the teacher's hidden-state spool lives in `/dev/shm`), `timeout`,
+  and the **pinned image digest**.
+- **NCCL for multi-node IB**: `NCCL_SOCKET_IFNAME=ib`, `NCCL_IB_HCA=^=mlx5_bond_0`, `NCCL_DEBUG=INFO` — the common
+  Ai2 IB values; confirm they match your fabric.
+- **Cluster (candidate):** `ai2/titan-cirrascale` (B200) or `ai2/holmes` (B300). Requirement: **sm_100** nodes,
+  8 GPU/node — production needs **8 nodes (64 GPU)**, the smoke 3. Our image needs **CUDA 12.8+ / torch ≥2.7**
+  (trainer torch 2.10+cu128, serve 2.11+cu130) — satisfied.
 
-**You only fill THREE team-specific values** (each marked `<PLACEHOLDER: …>`, present in both yamls):
-1. **`budget`** — your team's budget account, e.g. `ai2/oe-training`.
-2. **Weka `weka: <bucket>` + `subPath:`** — your team's bucket (see https://weka.allen.ai/), e.g.
-   `oe-training-default`, for the three mounts: the writable run dir (`RUN_DIR` + `JIT_CACHE_DIR` live under it)
-   and the two model dirs from step 1. Also set the `RUN_DIR` / `JIT_CACHE_DIR` env values to paths **under**
-   that mount (defaults `/weka/run/opd_v33` and `/weka/run/jit_cache` assume a mount at `/weka/run`).
-3. **`context.priority`** — your allocation tier on Titan (strict-priority cluster): `low|normal|high|urgent`.
+**Replace every `<PLACEHOLDER: …>` before submitting.** Most just need un-wrapping — they carry a recommended
+value (`RUN_DIR`, the model mount paths, `JIT_CACHE_DIR`, the subPaths). A few are genuinely your call, and we
+don't presume your values:
+- **`budget`** — your Beaker budget account.
+- **`weka: <bucket>` + `subPath:`** — the writable shared storage you use for training state, for the three
+  mounts (the run dir + the two model dirs from step 1). `RUN_DIR` / `JIT_CACHE_DIR` must be paths under that mount.
+- **`context.priority`** — your call.
 
 W&B is online by default — set `WANDB_API_KEY` from a Beaker **secret** (`beaker secret write wandb-api-key <key>`,
 then uncomment the `secret:` line). `HF_TOKEN` is **not** needed (models + seed dataset are public).

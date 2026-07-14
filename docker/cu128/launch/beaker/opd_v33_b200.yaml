@@ -12,13 +12,12 @@
 # CRITICAL — the shared run dir: RUN_DIR is the single source of truth shared by ALL 8 replicas
 # (config.json, trainer_endpoint.json, the teacher hidden-state spool index, the weight-sync buffer,
 # rolling weights, DCP checkpoints, the agentic pool, the rank->hostname gather, all logs). It MUST
-# be a WRITABLE filesystem visible at the SAME path on every replica (Weka). NOTE: the Beaker docs
-# say DataMounts are "read-only", but WEKA experiment mounts are read-write in practice at Ai2 (that
-# is how training checkpoints are written) — CONFIRM the run-dir mount is writable on the target
-# cluster before launch; the whole loop coordinates through it.
+# be a WRITABLE filesystem visible at the SAME path on every replica. Use whatever writable shared
+# storage your team uses for training state; the loop writes config/checkpoints/gather/logs to RUN_DIR,
+# so a read-only mount there fails at the first gather. Confirm it's writable before launch.
 
 version: v2
-budget: "<PLACEHOLDER: ai2/your-budget>"            # e.g. ai2/oe-training
+budget: "<PLACEHOLDER: your Beaker budget>"
 description: "OPD v2 V33 on-policy distillation (OPD-32B) on 64x B200, 8 replicas"
 retry:
   allowedTaskRetries: 2                             # ride out transient GPU/node failures (more likely at 64 GPU)
@@ -111,11 +110,11 @@ tasks:
 
     datasets:
       # WRITABLE shared run dir (config/endpoint/spool/weights/checkpoints/gather/logs). CRITICAL — the loop
-      # coordinates through it. Weka mounts ARE read-write at Ai2 (jobs write as root:root), so RUN_DIR +
-      # JIT_CACHE_DIR under this mount are writable. Pick YOUR team's bucket (see https://weka.allen.ai/).
+      # coordinates through it, so this mount MUST be writable (RUN_DIR + JIT_CACHE_DIR live under it). Use
+      # your team's writable shared storage; a Weka mount is shown here.
       - mountPath: /weka/run
         source:
-          weka: "<PLACEHOLDER: your-weka-bucket>"   # e.g. oe-training-default / oe-adapt-default (your team's)
+          weka: "<PLACEHOLDER: your-weka-bucket>"   # your team's writable bucket
         subPath: "<PLACEHOLDER: opd/run>"           # a writable prefix in the bucket (RUN_DIR + JIT_CACHE_DIR live under it)
       # teacher weights (DeepSeek-V4-Flash) — mountPath must not overlap the others
       - mountPath: /models/DeepSeek-V4-Flash
@@ -135,12 +134,12 @@ tasks:
       sharedMemory: 128GiB                          # teacher hidden spool lives in /dev/shm (default 5GiB is too small)
 
     context:
-      priority: "<PLACEHOLDER: normal>"             # low | normal | high | urgent — YOUR allocation on Titan (strict-priority)
+      priority: "<PLACEHOLDER: your Beaker priority>"   # your call — set per your team's allocation
 
     constraints:
       cluster:
-        - ai2/titan-cirrascale                      # 96x B200 (192 GB), 8x IB 400 Gbps/GPU; meets our cu12.8+/torch>=2.7.
-        #                                             8 nodes x 8 = 64 GPUs (of 96) needed. Strict-priority cluster.
-        # - ai2/holmes                              # alt: 576x B300 (288 GB, 800 Gbps/GPU) — also sm_100, auto-detect handles it
+        # Requirement: sm_100 nodes (B200 or B300), 8 GPU/node; this run needs 8 nodes = 64 GPUs. Pick your cluster:
+        - ai2/titan-cirrascale                      # B200 (192 GB), 8x IB 400 Gbps/GPU; meets our cu12.8+/torch>=2.7
+        # - ai2/holmes                              # alt: B300 (288 GB), 800 Gbps/GPU — also sm_100, teacher auto-detect handles it
 
-    timeout: 96h                                     # max job lifespan (Titan is strict-priority; cluster may cap this)
+    timeout: 96h                                     # max job lifespan (your cluster may cap this)
