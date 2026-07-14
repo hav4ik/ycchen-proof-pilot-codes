@@ -55,7 +55,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 - [ ] **Teacher** `deepseek-ai/DeepSeek-V4-Flash` downloaded to Weka, mounted at `/models/DeepSeek-V4-Flash`.
 - [ ] **Student** `chankhavu/yccchen-olmo3-deploy` downloaded to Weka, mounted at `/models/student-deploy`.
 - [ ] **`RUN_DIR`** and **`JIT_CACHE_DIR`** are WRITABLE shared Weka paths (JIT_CACHE_DIR fixed, not per-run).
-- [ ] *(optional)* Pre-warm `JIT_CACHE_DIR` from [`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100) to skip the ~10–20 min first-launch compile — see §2.
+- [ ] JIT compile cache: **nothing to do** — it ships baked in the image and auto-seeds into `JIT_CACHE_DIR` on launch (§2). Only the ~15 min fp4 autotune runs on the first cold launch (re-tuned per hardware, then persists).
 - [ ] Seed: nothing (auto-fetched at runtime) — OR pre-build `<RUN_DIR>/pool/seed.jsonl` for an offline cluster.
 - [ ] The 3 team-specific yaml values filled (budget, Weka bucket+subPath, priority) — see §3.
 - [ ] `WANDB_API_KEY` set as a Beaker secret (optional; W&B is online by default).
@@ -66,30 +66,31 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 |---|---|---|
 | `/models/DeepSeek-V4-Flash`, `/models/student-deploy` | mounted (read-only OK) | the checkpoints from step 1 |
 | **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
-| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. Optionally pre-warm it from [`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100) (see below). |
+| **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. The image **auto-seeds** the compile cache into it on launch (baked in — see below), so a cold first run skips the ~10–20 min compile. |
 
 **About the JIT cache (your "writable/saveable cache dir"):** the DeepSeek-V4 teacher JIT-compiles fp8/fp4
-kernels **per GEMM shape** — a cold node spends **~10–20 min** on DeepGEMM + **~15 min** on the flashinfer fp4
-autotune at first launch. With a writable, persistent `JIT_CACHE_DIR` this is a **one-time** cost: the run
-scripts arch+role-scope it (`sm100/{teacher,rollout}/…`), so the first replica compiles and **every later
-replica + future run reuses it**. Point it at Weka so it survives job restarts.
+kernels **per GEMM shape**. A truly cold node would spend **~10–20 min** on the DeepGEMM/JIT compile **plus**
+**~15 min** on the flashinfer fp4 autotune at first launch. The shipped image cuts the first part out entirely:
 
-### Optional: pre-warm the JIT cache from the public dataset (skip the first cold compile)
-We publish a pre-built sm_100 / TP4 JIT **compile** cache — **[`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100)**
-(one 20 MB artifact, `opd-jit-sm100-tp4.tgz`). Extract it into your `JIT_CACHE_DIR` **once, before the first
-run**, and the very first launch skips the ~10–20 min DeepGEMM/JIT compile (the run scripts find a warm cache):
+- **The compile cache ships BAKED INTO THE IMAGE.** `sha256:9d36b998…` carries a pre-built sm_100/TP4 JIT
+  **compile** cache at `/opt/opd/jit-cache-seed/sm100/{teacher,rollout}` (973 files / 74 MB). On launch,
+  `run_{teacher,rollout}.sh` copy it into your `JIT_CACHE_DIR` (`cp -rn`, **never clobbering a warmer cache**),
+  so **even a fully cold first run skips the ~10–20 min compile — no download, no prep step.** The copy is
+  optional: `JIT_CACHE_SEED=0` disables it, and it's skipped entirely if `JIT_CACHE_DIR` is unset.
+- **Only the ~15 min flashinfer fp4 autotune remains** on the first launch. It's **env-specific** (tuned to
+  your exact B200s), so it is deliberately **not** baked — your first run re-tunes for your hardware. With a
+  writable, persistent `JIT_CACHE_DIR` on Weka that result also persists, so **every later replica + future
+  run reuses everything**. Point `JIT_CACHE_DIR` at Weka so it survives job restarts.
+
+The baked cache is the public dataset
+[`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100) — **you do
+not need to fetch it** (it's already inside the image). Scope: **sm_100 (B200/B300) at TP4** (matches this
+loop's `TEACHER_TP=ROLLOUT_TP=4`); a different arch or TP just recompiles from scratch (harmless). If you ever
+want to seed a `JIT_CACHE_DIR` manually anyway (e.g. an air-gapped node using a different image):
 ```bash
-# on a networked prep node, with JIT_CACHE_DIR set to your fixed Weka cache path:
 hf download chankhavu/opd-jit-cache-sm100 opd-jit-sm100-tp4.tgz --repo-type dataset --local-dir /tmp/jitseed
-mkdir -p "$JIT_CACHE_DIR"
 tar xzf /tmp/jitseed/opd-jit-sm100-tp4.tgz -C "$JIT_CACHE_DIR"   # -> $JIT_CACHE_DIR/sm100/{teacher,rollout}/…
 ```
-Notes: (1) it's the **compile** cache (deep_gemm/triton/flashinfer/sglang/tvm-ffi/inductor cubins), which is
-portable; the flashinfer **fp4 autotune** is env-specific so it's *not* included — the teacher still runs its
-~15 min autotune on first launch, after which it too persists in your writable `JIT_CACHE_DIR`. (2) It is
-**sm_100 (B200/B300) at TP4** — matches this loop's `TEACHER_TP=ROLLOUT_TP=4`; a different TP or GPU arch just
-recompiles from scratch (harmless). (3) Purely optional — it only saves cold-start minutes; the writable
-`JIT_CACHE_DIR` is what actually matters. Opt out of any baked seed with `JIT_CACHE_SEED=0`.
 
 ## 3 · Fill the Beaker spec — most of it is already done
 
