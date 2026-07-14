@@ -182,6 +182,16 @@ hot-patching). In-container, cheapest→most-expensive:
 4. **Checkpoint resume** — relaunch the same `RUN_DIR` with `-e RESUME=1 -e MAX_STEPS=10`: trainer DCP-loads
    `latest.json`, health reports `step=5` (not 0), continues 6→10 with continuous loss.
 
+> ✅ **VALIDATED — checkpointing + resume DEFINITELY work (2026-07, 8×H200, baked image).** We ran the loop
+> with `CHECKPOINT_EVERY=2 CHECKPOINT_KEEP=2 HF_EXPORT=1 RESUME=1 MAX_STEPS=4` and it wrote **real durable
+> checkpoints to disk** at `<RUN_DIR>/checkpoints/step_000002/` and `step_000004/`, each containing:
+> `__*.distcp` + `.metadata` (DCP sharded fp32 model+optim = the resume shard), `meta.json`, and a consolidated
+> bf16 **`hf/`** export — with `latest.json → {"step": 4}`. `orchestrator.log` logged
+> `durable checkpoint -> …/step_000002 (Ns)` per write, and a follow-up `RESUME=1` relaunch DCP-loaded
+> `latest.json` and continued from the saved step (not step 0). So the checkpoint-save + HF-export + DCP-resume
+> paths are all exercised and green on the shipped image — which is why the Beaker launcher smoke can safely run
+> `CHECKPOINT_EVERY=0` (it doesn't need to re-pay the ~475 GB write to re-prove this).
+
 All four green ⇒ **container finalized** — sink + loop + weight-sync + checkpoint + resume validated on the
 baked image. Only the B200 sm_100 hardware pass remains (needs a B200; `MOE_BACKEND=auto` picks the
 Blackwell teacher backend).
