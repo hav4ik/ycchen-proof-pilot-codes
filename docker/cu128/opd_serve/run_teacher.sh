@@ -54,14 +54,24 @@ if [ -n "${JIT_CACHE_DIR:-}" ]; then
     ln -sfn "$_jc/$_d" "$HOME/.cache/$_d"
   done
   mkdir -p "$_jc/inductor"
-  # Seed from the image's baked warm compile cache (deep_gemm/triton/flashinfer/tvm-ffi for sm_100, TP4;
-  # NO autotune — that's re-tuned per deployment). cp -n = never clobber a warmer/newer entry, so a persistent
-  # (Weka) cache is untouched and a FRESH one skips the ~10-20min cold DeepGEMM/JIT compile.
-  # OPT-IN (default OFF): runs ONLY when JIT_CACHE_SEED=1 is explicitly set — the image never touches your
-  # JIT_CACHE_DIR unless you ask for it. The Beaker yamls set JIT_CACHE_SEED=1 to opt in.
+  # Seed from the image's baked warm cache (sm_100, TP4): the compile cubins (deep_gemm/triton/flashinfer/
+  # tvm-ffi) AND the flashinfer fp4 MoE autotune (sglang/flashinfer/autotune/…). cp -rn = never clobber a
+  # warmer/newer entry, so a persistent (Weka) cache is untouched; a FRESH one skips both the ~10-20min cold
+  # DeepGEMM/JIT compile AND the ~15min fp4 autotune -> teacher reaches /health in ~1-2min instead of ~16min.
+  # Two switches, BOTH ON by default:
+  #   JIT_CACHE_SEED=0    -> seed nothing (image never touches your JIT_CACHE_DIR)
+  #   JIT_AUTOTUNE_SEED=0 -> seed the compile cache but DROP the baked autotune (re-tune per hardware). The
+  #                          autotune is env-specific (keyed by flashinfer ver + sm100 + shape-hash); same arch
+  #                          + same TP4 -> it transfers, but set 0 to force a fresh tune if you suspect drift.
   _seed="${OPD_JIT_CACHE_SEED:-/opt/opd/jit-cache-seed}/sm${_ccap:-x}/teacher"
-  [ "${JIT_CACHE_SEED:-0}" = "1" ] && [ -d "$_seed" ] && { cp -rn "$_seed/." "$_jc/" 2>/dev/null || true; \
-    echo "[jit-cache] seeded compile cache from baked warm cache ($_seed)" >&2; }
+  if [ "${JIT_CACHE_SEED:-1}" = "1" ] && [ -d "$_seed" ]; then
+    _pre_at=$(find "$_jc" -type d -path '*flashinfer/autotune' 2>/dev/null | head -1)   # the user's own autotune, if any
+    cp -rn "$_seed/." "$_jc/" 2>/dev/null || true                                        # compile (+ bundled autotune); cp -n never clobbers
+    if [ "${JIT_AUTOTUNE_SEED:-1}" != "1" ] && [ -z "$_pre_at" ]; then
+      rm -rf "$_jc"/*/flashinfer/autotune 2>/dev/null || true                            # drop ONLY the seed's autotune (never a pre-existing one)
+    fi
+    echo "[jit-cache] seeded compile$([ "${JIT_AUTOTUNE_SEED:-1}" = "1" ] && echo '+autotune') cache from baked seed ($_seed)" >&2
+  fi
   export DG_JIT_CACHE_DIR="$HOME/.cache/deep_gemm" TRITON_CACHE_DIR="$HOME/.cache/triton" \
          TVM_FFI_CACHE_DIR="$HOME/.cache/tvm-ffi" TORCHINDUCTOR_CACHE_DIR="$_jc/inductor"
   echo "[jit-cache] persistent compile cache (sm${_ccap:-x}/teacher) -> $_jc" >&2

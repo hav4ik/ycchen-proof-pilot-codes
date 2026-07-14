@@ -55,7 +55,7 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 - [ ] **Teacher** `deepseek-ai/DeepSeek-V4-Flash` downloaded to Weka, mounted at `/models/DeepSeek-V4-Flash`.
 - [ ] **Student** `chankhavu/yccchen-olmo3-deploy` downloaded to Weka, mounted at `/models/student-deploy`.
 - [ ] **`RUN_DIR`** and **`JIT_CACHE_DIR`** are WRITABLE shared Weka paths (JIT_CACHE_DIR fixed, not per-run).
-- [ ] JIT compile cache: **nothing to do** — the yamls already set `JIT_CACHE_SEED=1` to opt in to the baked cache, which seeds into `JIT_CACHE_DIR` on launch (§2). Only the ~15 min fp4 autotune runs on the first cold launch (re-tuned per hardware, then persists). To compile from scratch, remove `JIT_CACHE_SEED` from the yaml.
+- [ ] JIT cache: **nothing to do** — the baked compile cache **and** fp4 autotune seed into `JIT_CACHE_DIR` on launch (ON by default), so a cold first run reaches `/health` in ~1–2 min (§2). Override with `JIT_CACHE_SEED=0` (seed nothing) or `JIT_AUTOTUNE_SEED=0` (compile only, re-tune per hardware).
 - [ ] Seed: nothing (auto-fetched at runtime) — OR pre-build `<RUN_DIR>/pool/seed.jsonl` for an offline cluster.
 - [ ] The 3 team-specific yaml values filled (budget, Weka bucket+subPath, priority) — see §3.
 - [ ] `WANDB_API_KEY` set as a Beaker secret (optional; W&B is online by default).
@@ -68,30 +68,28 @@ SEED_SOURCE=chankhavu/ycchen-dsflash-proof-distill-v2-test \
 | **`RUN_DIR`** (e.g. `/weka/run/opd_v33`) | **WRITABLE + shared + identical path on every replica; a DISTINCT path per run (smoke ≠ production)** | the loop's single source of truth: `config.json`, trainer endpoint, teacher hidden-state spool index, weight-sync buffer, rolling weights, **DCP + HF checkpoints**, the rank→hostname gather, all logs. A read-only mount fails at the first gather. The smoke and full run **must not share** it (the smoke's scaled-down `config.json` + short-context pool would clobber production's) — the two yamls already default to different paths (`/weka/run/opd_smoke3_b200` vs `/weka/run/opd_v33_b200`). |
 | **`JIT_CACHE_DIR`** (e.g. `/weka/jit_cache`) | **WRITABLE + shared + FIXED (not per-run)** | the DeepGEMM/triton/flashinfer JIT-compile cache. The serve stack **writes** compiled kernels here. Make it a **fixed** path (NOT under `RUN_DIR`) so it **persists across runs and instances**. With `JIT_CACHE_SEED=1` (the yamls set it) the image seeds its baked compile cache into this dir on launch (see below), so a cold first run skips the ~10–20 min compile. |
 
-**About the JIT cache (your "writable/saveable cache dir"):** the DeepSeek-V4 teacher JIT-compiles fp8/fp4
-kernels **per GEMM shape**. A truly cold node would spend **~10–20 min** on the DeepGEMM/JIT compile **plus**
-**~15 min** on the flashinfer fp4 autotune at first launch. The shipped image cuts the first part out entirely:
+**About the JIT cache (your "writable/saveable cache dir"):** on a fully cold node the DeepSeek-V4 teacher
+spends **~10–20 min** JIT-compiling fp8/fp4 kernels per GEMM shape **plus ~15 min** on the flashinfer fp4 MoE
+autotune — **~25–35 min before `/health` returns 200** (the profiling forward that triggers the autotune runs
+*during* init, before the port opens). The shipped image removes essentially all of it:
 
-- **The compile cache ships BAKED INTO THE IMAGE (opt-in).** `sha256:…` carries a pre-built sm_100/TP4 JIT
-  **compile** cache at `/opt/opd/jit-cache-seed/sm100/{teacher,rollout}` (973 files / 74 MB). When you set
-  **`JIT_CACHE_SEED=1`** (both yamls already do), `run_{teacher,rollout}.sh` copy it into your `JIT_CACHE_DIR`
-  (`cp -rn`, **never clobbering a warmer cache**), so **even a fully cold first run skips the ~10–20 min
-  compile — no download, no prep step.** It is **OPT-IN / default OFF**: without `JIT_CACHE_SEED=1` (or with
-  `JIT_CACHE_DIR` unset) the image **never touches your cache dir** and every kernel compiles from scratch.
-- **Only the ~15 min flashinfer fp4 autotune remains** on the first launch. It's **env-specific** (tuned to
-  your exact B200s), so it is deliberately **not** baked — your first run re-tunes for your hardware. With a
-  writable, persistent `JIT_CACHE_DIR` on Weka that result also persists, so **every later replica + future
-  run reuses everything**. Point `JIT_CACHE_DIR` at Weka so it survives job restarts.
+- **Both the compile cache AND the fp4 autotune ship BAKED INTO THE IMAGE, seeded ON by default.** It carries a
+  pre-built sm_100/TP4 cache at `/opt/opd/jit-cache-seed/sm100/{teacher,rollout}` — compile cubins
+  (deep_gemm/triton/flashinfer/tvm-ffi) **and** the flashinfer fp4 autotune (`sglang/flashinfer/autotune/…`).
+  On launch `run_{teacher,rollout}.sh` copy it into your `JIT_CACHE_DIR` (`cp -rn`, **never clobbering a warmer
+  cache**), so **a cold first run reaches `/health` in ~1–2 min instead of ~25–35 min** — no download, no prep.
+- **Two off-switches** (both default on): `JIT_CACHE_SEED=0` seeds nothing (image never touches your cache dir);
+  `JIT_AUTOTUNE_SEED=0` keeps the compile cache but drops the baked autotune so it re-tunes for your hardware.
+- **The autotune is env-specific but should transfer**: it's keyed by `flashinfer-version + sm100 + shape-hash`
+  (all identical across B200 nodes running this pinned image at TP4) — **not** by driver/CUDA version. Worst
+  case if it doesn't hit, flashinfer re-tunes (~15 min, still under the launcher's **30 min health-gate**, and
+  it then persists in `JIT_CACHE_DIR`). Correctness is never at risk (every cached tactic is a valid kernel).
+  If you'd rather each site re-tune from scratch, set `JIT_AUTOTUNE_SEED=0`.
 
-The baked cache is the public dataset
-[`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100) — **you do
-not need to fetch it** (it's already inside the image). Scope: **sm_100 (B200/B300) at TP4** (matches this
-loop's `TEACHER_TP=ROLLOUT_TP=4`); a different arch or TP just recompiles from scratch (harmless). If you ever
-want to seed a `JIT_CACHE_DIR` manually anyway (e.g. an air-gapped node using a different image):
-```bash
-hf download chankhavu/opd-jit-cache-sm100 opd-jit-sm100-tp4.tgz --repo-type dataset --local-dir /tmp/jitseed
-tar xzf /tmp/jitseed/opd-jit-sm100-tp4.tgz -C "$JIT_CACHE_DIR"   # -> $JIT_CACHE_DIR/sm100/{teacher,rollout}/…
-```
+Point `JIT_CACHE_DIR` at Weka so whatever is (re)tuned persists across restarts + replicas. The baked cache is
+the public dataset [`chankhavu/opd-jit-cache-sm100`](https://huggingface.co/datasets/chankhavu/opd-jit-cache-sm100)
+(`opd-jit-sm100-tp4-autotune.tgz`) — **you do not need to fetch it** (it's in the image). Scope: **sm_100
+(B200/B300) at TP4** (matches `TEACHER_TP=ROLLOUT_TP=4`); a different arch/TP just recompiles (harmless).
 
 ## 3 · Fill the Beaker spec — most of it is already done
 

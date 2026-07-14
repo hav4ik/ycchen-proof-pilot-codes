@@ -45,13 +45,19 @@ if [ -n "${JIT_CACHE_DIR:-}" ]; then
     ln -sfn "$_jc/$_d" "$HOME/.cache/$_d"
   done
   mkdir -p "$_jc/inductor"
-  # Seed from the image's baked warm compile cache (sm_100, TP; NO autotune). cp -n = never clobber a warmer
-  # entry -> persistent Weka cache untouched, a FRESH one skips the ~10-20min cold compile.
-  # OPT-IN (default OFF): runs ONLY when JIT_CACHE_SEED=1 is explicitly set — the image never touches your
-  # JIT_CACHE_DIR unless you ask for it. The Beaker yamls set JIT_CACHE_SEED=1 to opt in.
+  # Seed from the image's baked warm cache (sm_100, TP): compile cubins + any bundled autotune. cp -rn = never
+  # clobber a warmer/newer entry -> persistent Weka cache untouched, a FRESH one skips the cold compile.
+  # Two switches, BOTH ON by default (mirror run_teacher.sh):
+  #   JIT_CACHE_SEED=0    -> seed nothing         JIT_AUTOTUNE_SEED=0 -> compile only, drop the seed's autotune
   _seed="${OPD_JIT_CACHE_SEED:-/opt/opd/jit-cache-seed}/sm${_ccap:-x}/rollout"
-  [ "${JIT_CACHE_SEED:-0}" = "1" ] && [ -d "$_seed" ] && { cp -rn "$_seed/." "$_jc/" 2>/dev/null || true; \
-    echo "[jit-cache] seeded compile cache from baked warm cache ($_seed)" >&2; }
+  if [ "${JIT_CACHE_SEED:-1}" = "1" ] && [ -d "$_seed" ]; then
+    _pre_at=$(find "$_jc" -type d -path '*flashinfer/autotune' 2>/dev/null | head -1)
+    cp -rn "$_seed/." "$_jc/" 2>/dev/null || true
+    if [ "${JIT_AUTOTUNE_SEED:-1}" != "1" ] && [ -z "$_pre_at" ]; then
+      rm -rf "$_jc"/*/flashinfer/autotune 2>/dev/null || true
+    fi
+    echo "[jit-cache] seeded compile$([ "${JIT_AUTOTUNE_SEED:-1}" = "1" ] && echo '+autotune') cache from baked seed ($_seed)" >&2
+  fi
   export DG_JIT_CACHE_DIR="$HOME/.cache/deep_gemm" TRITON_CACHE_DIR="$HOME/.cache/triton" \
          TVM_FFI_CACHE_DIR="$HOME/.cache/tvm-ffi" TORCHINDUCTOR_CACHE_DIR="$_jc/inductor"
   echo "[jit-cache] persistent compile cache (sm${_ccap:-x}/rollout) -> $_jc" >&2

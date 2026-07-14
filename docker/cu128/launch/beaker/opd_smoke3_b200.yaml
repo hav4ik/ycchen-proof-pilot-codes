@@ -70,8 +70,8 @@ tasks:
         value: "<PLACEHOLDER: /models/student-deploy>"
       - name: JIT_CACHE_DIR                         # fixed shared path (NOT under RUN_DIR) so it persists across runs
         value: "<PLACEHOLDER: /weka/run/jit_cache>"
-      - name: JIT_CACHE_SEED                        # "1" = opt in to the baked compile-cache pre-seed (default OFF); the smoke
-        value: "1"                                  # warms JIT_CACHE_DIR so the full run reuses it. cp -rn never clobbers.
+      # JIT pre-seed (compile + fp4 autotune) is ON by default in the image -> the smoke warms JIT_CACHE_DIR
+      # for the full run. Override with JIT_CACHE_SEED=0 (none) or JIT_AUTOTUNE_SEED=0 (compile only). cp -rn never clobbers.
       - name: NCCL_SOCKET_IFNAME
         value: "ib"
       - name: NCCL_IB_HCA

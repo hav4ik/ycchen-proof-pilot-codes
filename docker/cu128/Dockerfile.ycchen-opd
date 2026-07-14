@@ -216,12 +216,14 @@ RUN set -eux; \
 COPY docker/cu128/launch /opt/opd/launch
 RUN chmod +x /opt/opd/launch/*.sh
 
-# Pre-warmed JIT COMPILE cache (deep_gemm/triton/flashinfer/tvm-ffi kernels for sm_100, TP4; NO autotune -
-# that's env-specific, re-tuned per deployment) so the FIRST B200 launch skips the ~10-20min cold DeepGEMM/JIT
-# compile. run_{teacher,rollout}.sh seed-copy it into JIT_CACHE_DIR on launch (cp -n -> never clobbers a warmer
-# cache). The tarball is VENDORED into docker/cu128/jit-cache/ (downloaded from the public HF dataset
-# chankhavu/opd-jit-cache-sm100; gitignored like the FA2 wheel) and COPY'd — no build-time network. If no
-# tarball is vendored the build still succeeds (runtime compile fallback). Runtime opt-out: JIT_CACHE_SEED=0.
+# Pre-warmed JIT cache (sm_100, TP4): the compile cubins (deep_gemm/triton/flashinfer/tvm-ffi) AND the
+# flashinfer fp4 MoE autotune (sglang/flashinfer/autotune/…), so the FIRST B200 launch skips BOTH the
+# ~10-20min cold DeepGEMM/JIT compile AND the ~15min fp4 autotune -> teacher reaches /health in ~1-2min.
+# run_{teacher,rollout}.sh seed-copy it into JIT_CACHE_DIR on launch (cp -rn -> never clobbers a warmer cache);
+# both seeds are ON by default (JIT_CACHE_SEED=0 disables all; JIT_AUTOTUNE_SEED=0 keeps compile, drops the
+# env-specific autotune). The tarball is VENDORED into docker/cu128/jit-cache/ (from the public HF dataset
+# chankhavu/opd-jit-cache-sm100 -> opd-jit-sm100-tp4-autotune.tgz; gitignored like the FA2 wheel) and COPY'd —
+# no build-time network. If no tarball is vendored the build still succeeds (runtime compile fallback).
 ENV OPD_JIT_CACHE_SEED=/opt/opd/jit-cache-seed
 COPY docker/cu128/jit-cache /tmp/jit-cache
 RUN mkdir -p "$OPD_JIT_CACHE_SEED"; \
