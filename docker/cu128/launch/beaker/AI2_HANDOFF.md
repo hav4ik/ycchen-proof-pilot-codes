@@ -7,7 +7,7 @@ run dir, and (3) a WRITABLE shared JIT-compile cache dir.** Then fill the site-s
 
 **Image (ship digest, drift-clean, all B200 fixes validated on B200):**
 ```
-chankhavu/ycchen-opd:cu128@sha256:9d36b9988e24193be0bf9bdd0eb5f4540db6f6f366c301ab2a93ca9815fb3ab0
+chankhavu/ycchen-opd:cu128@sha256:1aa10603832a54dc2520372ef8df94d6d89d8c6de6ad8e86618db745ad7f4a0c
 ```
 (Optionally import it into Beaker for faster pulls than Docker Hub, then use the `beaker:` image field.)
 
